@@ -157,14 +157,9 @@ if __name__ == "__main__":
 
         if item:
             row = extract_googlebooks_fields(item)
+            enriched_rows.append(row)
         else:
-            row = {
-                "gb_id": None, "title": None, "subtitle": None,
-                "authors": None, "publisher": None, "pub_date": None,
-                "language": None, "categories": None, "isbn13": None,
-                "isbn10": None, "price_amount": None, "price_currency": None
-            }
+            print("[INFO] Libro sin coincidencia en Google Books → se omite")
 
-        enriched_rows.append(row)
 
     save_googlebooks_csv(enriched_rows)

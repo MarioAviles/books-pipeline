@@ -235,43 +235,45 @@ def get_book(book_id: str) -> BookData:
 # 🔍 Extraer IDs desde categoría
 # ===============================================
 def get_book_ids_from_genre(genre_url: str, limit: int = 15) -> List[str]:
-    print(f"[DEBUG] Accediendo a URL de género: {genre_url}")
-
-    r = SESSION.get(genre_url, timeout=30)
-    print(f"[DEBUG] Status code: {r.status_code}")
-
-    if r.status_code != 200:
-        print("[ERROR] No se pudo acceder al género.")
-        return []
-
-    print("[DEBUG] Procesando HTML de la página del género...")
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    links = soup.select("a.bookTitle")
-    print(f"[DEBUG] Enlaces encontrados con .bookTitle: {len(links)}")
-
     ids = []
-    for idx, link in enumerate(links[:limit]):
-        href = link.get("href", "")
-        print(f"[DEBUG] Link #{idx}: href={href}")
+    page = 1
 
-        m = re.search(r'/book/show/(\d+)', href)
-        if m:
-            book_id = m.group(1)
-            print(f"[DEBUG] → ID detectado: {book_id}")
-            ids.append(book_id)
-        else:
-            print("[WARNING] No se pudo extraer ID de este enlace.")
+    while len(ids) < limit:
+        paged_url = f"{genre_url}&page={page}"
+        print(f"[DEBUG] Cargando página {page}: {paged_url}")
 
-    print(f"[DEBUG] IDs finales: {ids}")
+        r = SESSION.get(paged_url, timeout=30)
 
-    return ids
+        if r.status_code != 200:
+            print("[ERROR] No se pudo acceder a la página:", paged_url)
+            break
 
+        soup = BeautifulSoup(r.text, "html.parser")
+        links = soup.select("a.bookTitle")
 
-# ===============================================
-# 🚀 EJECUCIÓN PRINCIPAL
-# ===============================================
+        print(f"[DEBUG] Enlaces encontrados en esta página: {len(links)}")
+
+        if not links:
+            print("[WARNING] No hay más resultados en páginas siguientes.")
+            break
+
+        for link in links:
+            href = link.get("href", "")
+            m = re.search(r'/book/show/(\d+)', href)
+            if m:
+                book_id = m.group(1)
+                if book_id not in ids:
+                    ids.append(book_id)
+
+                if len(ids) >= limit:
+                    break
+
+        page += 1
+        time.sleep(0.5)
+
+    print(f"[DEBUG] IDs finales ({len(ids)}): {ids}")
+    return ids[:limit]
+
 
 import os
 
@@ -282,7 +284,7 @@ if __name__ == "__main__":
     genre_url = f"https://www.goodreads.com/search?q=data+science"
 
     print("Buscando libros en la categoría...\n")
-    book_ids = get_book_ids_from_genre(genre_url, limit=10)
+    book_ids = get_book_ids_from_genre(genre_url, limit=15)
 
     print("IDs encontrados:", book_ids, "\n")
 
