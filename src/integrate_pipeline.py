@@ -272,6 +272,169 @@ def build_dim_book(df):
         row["ts_ultima_actualizacion"] = datetime.now().isoformat()
         rows.append(row)
 
+    df_result = pd.DataFrame(rows)
+
+    # ✅ 1️⃣ Eliminar duplicados exactos por ISBN13
+    df_result = df_result.drop_duplicates(subset=["isbn13"], keep="first")
+
+    # ✅ 2️⃣ Eliminar duplicados por título + subtítulo, conservando el que tenga más datos no nulos
+    def count_non_nulls(row):
+        return row.notna().sum()
+
+    df_result["non_nulls"] = df_result.apply(count_non_nulls, axis=1)
+
+    df_result = (
+        df_result.sort_values("non_nulls", ascending=False)
+        .drop_duplicates(subset=["title", "subtitle"], keep="first")
+        .drop(columns=["non_nulls"])
+        .reset_index(drop=True)
+    )
+
+    return df_result
+
+    rows = []
+
+    def assign_group(row):
+        isbn13 = str(row.get("isbn13")) if pd.notna(row.get("isbn13")) else None
+        isbn10 = str(row.get("isbn10")) if pd.notna(row.get("isbn10")) else None
+        if isbn13 and isbn13.isdigit() and len(isbn13) == 13:
+            return isbn13
+        if isbn10 and isbn10.isdigit() and len(isbn10) == 10:
+            return isbn10
+        return canonical_id_from_fields(row.get("title"), row.get("authors"), row.get("publisher"))
+
+    df["group_id"] = df.apply(assign_group, axis=1)
+    grouped = df.groupby("group_id")
+
+    for gid, g in grouped:
+        gb = g[g["source"] == "googlebooks"].copy()
+        gr = g[g["source"] == "goodreads"].copy()
+
+        if len(gb) > 0:
+            gb.loc[:, "pub_tmp"] = gb["pub_date"].apply(normalize_date)
+            gb = gb.sort_values("pub_tmp", ascending=False)
+            winner = gb.iloc[0]
+        else:
+            winner = g.iloc[0]
+
+        row = {}
+        title, subtitle = split_title_and_subtitle(winner.get("title"), winner.get("subtitle"))
+        row["book_id"] = gid
+        row["title"] = title
+        row["subtitle"] = subtitle
+        row["publisher"] = clean_publisher(winner.get("publisher"))
+
+        isbn13w = winner.get("isbn13")
+        row["isbn13"] = isbn13w if isinstance(isbn13w, (str, int)) and str(isbn13w).isdigit() and len(str(isbn13w)) == 13 else None
+        row["isbn10"] = winner.get("isbn10")
+
+        pubdate = winner.get("pub_date")
+        if not pubdate:
+            pubdate = next((x for x in g["pub_date"].dropna()), None)
+        row["pub_date_norm"] = normalize_date(pubdate)
+
+        lang = winner.get("language")
+        if not lang or pd.isna(lang):
+            lang = next((x for x in g["language"].dropna()), None)
+        row["language_norm"] = normalize_language(lang)
+
+        price = winner.get("price_amount")
+        if not price:
+            price = next((x for x in g["price_amount"].dropna()), None)
+        row["price_amount_norm"] = normalize_price(price)
+        row["price_currency"] = winner.get("price_currency")
+
+        categories = set()
+        for c in g["categories"].dropna():
+            for x in normalize_categories(c):
+                categories.add(x)
+        row["categories"] = sorted(list(categories)) if categories else None
+
+        authors = set()
+        for a in g["authors"].dropna():
+            for x in normalize_authors(a):
+                authors.add(x)
+        row["authors"] = sorted(list(authors)) if authors else None
+
+        row["fuente_ganadora"] = winner["source"]
+        row["ts_ultima_actualizacion"] = datetime.now().isoformat()
+        rows.append(row)
+
+    df_result = pd.DataFrame(rows)
+
+    # ✅ Eliminamos duplicados exactos por ISBN13
+    df_result = df_result.drop_duplicates(subset=["isbn13"], keep="first")
+
+    return df_result
+
+    rows = []
+
+    def assign_group(row):
+        isbn13 = str(row.get("isbn13")) if pd.notna(row.get("isbn13")) else None
+        isbn10 = str(row.get("isbn10")) if pd.notna(row.get("isbn10")) else None
+        if isbn13 and isbn13.isdigit() and len(isbn13) == 13:
+            return isbn13
+        if isbn10 and isbn10.isdigit() and len(isbn10) == 10:
+            return isbn10
+        return canonical_id_from_fields(row.get("title"), row.get("authors"), row.get("publisher"))
+
+    df["group_id"] = df.apply(assign_group, axis=1)
+    grouped = df.groupby("group_id")
+
+    for gid, g in grouped:
+        gb = g[g["source"] == "googlebooks"].copy()
+        gr = g[g["source"] == "goodreads"].copy()
+
+        if len(gb) > 0:
+            gb.loc[:, "pub_tmp"] = gb["pub_date"].apply(normalize_date)
+            gb = gb.sort_values("pub_tmp", ascending=False)
+            winner = gb.iloc[0]
+        else:
+            winner = g.iloc[0]
+
+        row = {}
+        title, subtitle = split_title_and_subtitle(winner.get("title"), winner.get("subtitle"))
+        row["book_id"] = gid
+        row["title"] = title
+        row["subtitle"] = subtitle
+        row["publisher"] = clean_publisher(winner.get("publisher"))
+
+        isbn13w = winner.get("isbn13")
+        row["isbn13"] = isbn13w if isinstance(isbn13w, (str, int)) and str(isbn13w).isdigit() and len(str(isbn13w)) == 13 else None
+        row["isbn10"] = winner.get("isbn10")
+
+        pubdate = winner.get("pub_date")
+        if not pubdate:
+            pubdate = next((x for x in g["pub_date"].dropna()), None)
+        row["pub_date_norm"] = normalize_date(pubdate)
+
+        lang = winner.get("language")
+        if not lang or pd.isna(lang):
+            lang = next((x for x in g["language"].dropna()), None)
+        row["language_norm"] = normalize_language(lang)
+
+        price = winner.get("price_amount")
+        if not price:
+            price = next((x for x in g["price_amount"].dropna()), None)
+        row["price_amount_norm"] = normalize_price(price)
+        row["price_currency"] = winner.get("price_currency")
+
+        categories = set()
+        for c in g["categories"].dropna():
+            for x in normalize_categories(c):
+                categories.add(x)
+        row["categories"] = sorted(list(categories)) if categories else None
+
+        authors = set()
+        for a in g["authors"].dropna():
+            for x in normalize_authors(a):
+                authors.add(x)
+        row["authors"] = sorted(list(authors)) if authors else None
+
+        row["fuente_ganadora"] = winner["source"]
+        row["ts_ultima_actualizacion"] = datetime.now().isoformat()
+        rows.append(row)
+
     return pd.DataFrame(rows)
 
 # ============================================================
