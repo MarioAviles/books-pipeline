@@ -22,20 +22,29 @@ def load_goodreads_json() -> list:
 
 
 # --------------------------------------------------
-# 🔍 Función general de búsqueda: varias estrategias
+# 🔍 Función general de búsqueda + retry inteligente
 # --------------------------------------------------
-def google_books_search(query: str) -> Optional[Dict]:
+def google_books_search(query: str, retry: int = 2) -> Optional[Dict]:
     params = {"q": query, "maxResults": 1}
-
     print(f"[DEBUG] Google Books Query: {params}")
 
     try:
         r = requests.get(GOOGLE_API_URL, headers=HEADERS, params=params, timeout=20)
+
         if r.status_code != 200:
-            print("[WARNING] API error:", r.status_code)
+            print(f"[WARNING] API error: {r.status_code}")
             return None
 
         data = r.json()
+
+        # Manejo de rate limit
+        if "error" in data and retry > 0:
+            reason = data["error"]["errors"][0].get("reason")
+            if reason == "rateLimitExceeded":
+                print("[WARNING] Rate limit — reintentando...")
+                time.sleep(2)
+                return google_books_search(query, retry - 1)
+
         if "items" not in data:
             return None
 
@@ -51,8 +60,16 @@ def google_books_search(query: str) -> Optional[Dict]:
 # --------------------------------------------------
 def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str, authors: list) -> Optional[Dict]:
 
-    clean_title = title.replace('"', '').replace("'", "")
-    primary_author = authors[0] if authors else ""
+    # limpiar título de problemas comunes
+    clean_title = (
+        title.replace('"', "")
+             .replace("'", "")
+             .replace("“", "")
+             .replace("”", "")
+             .strip()
+    )
+
+    primary_author = authors[0] if isinstance(authors, list) and authors else ""
 
     # 1️⃣ Buscar por ISBN13
     if isbn13:
@@ -66,19 +83,19 @@ def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str,
         if item:
             return item
 
-    # 3️⃣ Buscar por título + autor
-    if primary_author:
+    # 3️⃣ Título + autor
+    if clean_title and primary_author:
         item = google_books_search(f'intitle:"{clean_title}" inauthor:"{primary_author}"')
         if item:
             return item
 
-    # 4️⃣ Buscar solo por título
-    item = google_books_search(f'intitle:"{clean_title}"')
-    if item:
-        return item
+    # 4️⃣ Solo título
+    if clean_title:
+        item = google_books_search(f'intitle:"{clean_title}"')
+        if item:
+            return item
 
-    # 5️⃣ Nada encontrado
-    print("[INFO] Sin resultados tras aplicar todas las estrategias.")
+    print("[INFO] Sin resultados tras todas las estrategias")
     return None
 
 
@@ -95,33 +112,52 @@ def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
     isbn10 = None
 
     for entry in volume.get("industryIdentifiers", []):
-        if entry["type"] == "ISBN_13":
-            isbn13 = entry["identifier"]
-        elif entry["type"] == "ISBN_10":
-            isbn10 = entry["identifier"]
+        t = entry.get("type")
+        if t == "ISBN_13":
+            isbn13 = entry.get("identifier")
+        elif t == "ISBN_10":
+            isbn10 = entry.get("identifier")
+
+    # Autores
+    authors_raw = volume.get("authors")
+    authors = "; ".join(authors_raw) if isinstance(authors_raw, list) else None
+
+    # Categorías
+    cats_raw = volume.get("categories", [])
+    if isinstance(cats_raw, list):
+        cats_clean = [c for c in cats_raw if isinstance(c, str)]
+        categories = "; ".join(cats_clean) if cats_clean else None
+    else:
+        categories = None
 
     # Precio
     price_amount = None
     price_currency = None
+
     if sale.get("saleability") == "FOR_SALE":
         price = sale.get("retailPrice", {})
-        price_amount = price.get("amount")
+        raw_amount = price.get("amount")
+        if isinstance(raw_amount, str):
+            raw_amount = raw_amount.replace(",", ".")
+        try:
+            price_amount = float(raw_amount)
+        except:
+            price_amount = None
         price_currency = price.get("currencyCode")
 
     return {
         "gb_id": item.get("id"),
         "title": volume.get("title"),
         "subtitle": volume.get("subtitle"),
-        "authors": "; ".join(volume.get("authors", [])),
+        "authors": authors,
         "publisher": volume.get("publisher"),
         "pub_date": volume.get("publishedDate"),
         "language": volume.get("language"),
-        "categories": "; ".join(volume.get("categories", []))
-        if "categories" in volume else None,
+        "categories": categories,
         "isbn13": isbn13,
         "isbn10": isbn10,
         "price_amount": price_amount,
-        "price_currency": price_currency
+        "price_currency": price_currency,
     }
 
 
@@ -130,8 +166,20 @@ def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------
 def save_googlebooks_csv(rows: list):
     df = pd.DataFrame(rows)
+
+    # orden de columnas consistente
+    ordered_cols = [
+        "gb_id", "title", "subtitle", "authors", "publisher",
+        "pub_date", "language", "categories",
+        "isbn13", "isbn10",
+        "price_amount", "price_currency"
+    ]
+
+    df = df.reindex(columns=ordered_cols)
+
     os.makedirs("landing", exist_ok=True)
     df.to_csv(LANDING_PATH, index=False, encoding="utf-8", sep=";")
+
     print(f"[INFO] Archivo generado: {LANDING_PATH}")
 
 
@@ -145,10 +193,12 @@ if __name__ == "__main__":
 
     for book in goodreads:
         print("\n============================================")
-        print(f"[INFO] Procesando: {book['title']}")
+        print(f"[INFO] Procesando: {book.get('title')}")
 
         isbn13 = book.get("isbn13")
-        isbn10 = book.get("isbn")  # Goodreads puede guardar ISBN10 aquí
+        isbn10_raw = book.get("isbn")
+        isbn10 = isbn10_raw if isbn10_raw and str(isbn10_raw).strip() else None
+
         title = book.get("title", "")
         authors = book.get("authors", [])
 
@@ -156,10 +206,8 @@ if __name__ == "__main__":
         time.sleep(0.4)
 
         if item:
-            row = extract_googlebooks_fields(item)
-            enriched_rows.append(row)
+            enriched_rows.append(extract_googlebooks_fields(item))
         else:
             print("[INFO] Libro sin coincidencia en Google Books → se omite")
-
 
     save_googlebooks_csv(enriched_rows)

@@ -1,194 +1,365 @@
-import json
-import pandas as pd
 import os
+import json
 import hashlib
-import numpy as np
 from datetime import datetime
-from utils_quality import (
-    validate_isbn13,
-    validate_isbn10,
-    normalize_date,
-    normalize_language,
-    normalize_price,
-    detect_nulls,
-    detect_duplicates,
-    compute_quality_metrics,
-)
-from utils_isbn import canonical_book_id
+import ast
+import pandas as pd
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# ============================================================
+# 📁 RUTAS
+# ============================================================
 
 LANDING_GOODREADS = "landing/goodreads_books.json"
 LANDING_GOOGLE = "landing/googlebooks_books.csv"
 
-OUT_DIM = "standard/dim_book.parquet"
-OUT_DETAIL = "standard/book_source_detail.parquet"
-OUT_QUALITY = "docs/quality_metrics.json"
-OUT_SCHEMA = "docs/schema.md"
-
+STANDARD_DIR = "standard"
+DOCS_DIR = "docs"
 
 # ============================================================
-# Conversión segura a tipos nativos JSON
+# 🔧 NORMALIZADORES Y MAPEOS
 # ============================================================
-def to_python_native(obj):
-    """
-    Convierte numpy.int64, numpy.float64, pandas NA, etc.
-    a tipos nativos serializables por JSON.
-    """
-    if isinstance(obj, dict):
-        return {k: to_python_native(v) for k, v in obj.items()}
 
-    elif isinstance(obj, list):
-        return [to_python_native(v) for v in obj]
+PUBLISHER_MAP = {
+    "oreilly & associates incorporated": "O'Reilly Media",
+    "o'reilly media, inc.": "O'Reilly Media",
+    "oreilly media": "O'Reilly Media",
+    "john wiley & sons": "Wiley",
+    "wiley": "Wiley",
+}
 
-    elif isinstance(obj, (np.integer,)):
-        return int(obj)
+def clean_publisher(p):
+    if not p or str(p).lower() in ("nan", "none"):
+        return None
+    p = str(p).strip().replace('"', "").replace("'", "")
+    key = p.lower()
+    return PUBLISHER_MAP.get(key, p.strip())
 
-    elif isinstance(obj, (np.floating,)):
-        return float(obj)
+def normalize_authors(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        val = value
+    elif isinstance(value, str):
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                val = ast.literal_eval(value)
+            except:
+                val = [value]
+        elif ";" in value:
+            val = value.split(";")
+        else:
+            val = [value]
+    else:
+        val = [str(value)]
+    names = [str(x).strip().replace(".", "") for x in val if x and str(x).strip()]
+    unique = sorted(set([n.title() for n in names]))
+    return unique
 
-    elif pd.isna(obj):
+def normalize_categories(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        vals = value
+    elif isinstance(value, str):
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                vals = ast.literal_eval(value)
+            except:
+                vals = [value]
+        elif ";" in value:
+            vals = value.split(";")
+        else:
+            vals = [value]
+    else:
+        vals = [str(value)]
+    return sorted(set([x.strip() for x in vals if x.strip()]))
+
+def normalize_date(date_str):
+    if not date_str or str(date_str).lower() in ("nan", "none", ""):
+        return None
+    try:
+        parsed = pd.to_datetime(str(date_str), errors="coerce")
+        if pd.isna(parsed):
+            return None
+        if parsed.day == 1 and parsed.month == 1:
+            return str(parsed.year)
+        return str(parsed.date())
+    except:
         return None
 
-    return obj
+def normalize_language(lang):
+    if not lang:
+        return None
+    lang = str(lang).lower().strip()
+    mapping = {
+        "english": "en",
+        "eng": "en",
+        "en-us": "en",
+        "spanish": "es",
+        "español": "es",
+        "pt-br": "pt-BR"
+    }
+    return mapping.get(lang, lang)
 
+def normalize_price(value):
+    if value is None or str(value).lower() in ("nan", "none", ""):
+        return None
+    try:
+        return float(str(value).replace(",", ".").strip())
+    except:
+        return None
+
+def canonical_id_from_fields(title, authors, publisher):
+    key = (str(title).lower().strip()
+           + str(authors).lower().strip()
+           + str(publisher).lower().strip())
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 # ============================================================
-# 1. CARGA DE DATOS
+# 📥 CARGA DE FUENTES
 # ============================================================
+
 def load_sources():
-    print("[INFO] Cargando landing/ ...")
-
-    goodreads = pd.read_json(LANDING_GOODREADS, dtype=str)
-    google = pd.read_csv(LANDING_GOOGLE, sep=";", dtype=str)
-
-    print(f"[INFO] Goodreads: {len(goodreads)} filas")
-    print(f"[INFO] GoogleBooks: {len(google)} filas")
-
-    return goodreads, google
-
+    df_gr = pd.read_json(LANDING_GOODREADS)
+    df_gr["source"] = "goodreads"
+    df_gb = pd.read_csv(LANDING_GOOGLE, sep=";")
+    df_gb["source"] = "googlebooks"
+    df_gr["publisher"] = df_gr["publisher"].apply(clean_publisher)
+    df_gb["publisher"] = df_gb["publisher"].apply(clean_publisher)
+    return df_gr, df_gb
 
 # ============================================================
-# 2. CREAR book_source_detail (Trazabilidad + Validaciones)
+# 🔎 NORMALIZACIÓN Y AGRUPACIÓN
 # ============================================================
-def build_source_detail(goodreads, google):
 
-    goodreads["source"] = "goodreads"
-    google["source"] = "googlebooks"
+def normalize_title(t):
+    if not t:
+        return ""
+    return str(t).lower().replace(":", "").replace("-", "").replace('"', "").strip()
 
-    df = pd.concat([goodreads, google], ignore_index=True, sort=False)
-
-    # flags de validación
-    df["flag_isbn13_valid"] = df["isbn13"].apply(lambda x: validate_isbn13(x))
-    df["flag_isbn10_valid"] = df["isbn10"].apply(lambda x: validate_isbn10(x))
-    df["flag_date_valid"] = df["pub_date"].apply(lambda x: normalize_date(x) is not None)
-
-    return df
-
+def same_book(title1, authors1, title2, authors2):
+    if normalize_title(title1) != normalize_title(title2):
+        return False
+    set1 = set([a.lower() for a in normalize_authors(authors1)])
+    set2 = set([a.lower() for a in normalize_authors(authors2)])
+    return len(set1.intersection(set2)) > 0
 
 # ============================================================
-# 3. MODELO CANÓNICO (dim_book)
+# 🧩 DIVISIÓN AUTOMÁTICA TÍTULO / SUBTÍTULO
 # ============================================================
+
+def split_title_and_subtitle(title, subtitle):
+    """
+    Si no hay subtitle pero el title contiene ':' o '–',
+    divide automáticamente en título y subtítulo.
+    """
+    if isinstance(title, float) or pd.isna(title):
+        title = ""
+    if isinstance(subtitle, float) or pd.isna(subtitle):
+        subtitle = None
+
+    if subtitle and str(subtitle).strip():
+        return str(title).strip(), str(subtitle).strip()
+
+    if not title or str(title).strip() == "":
+        return None, None
+
+    # Detectar separadores comunes
+    text = str(title).strip()
+    if ":" in text:
+        parts = [p.strip() for p in text.split(":", 1)]
+    elif "–" in text:
+        parts = [p.strip() for p in text.split("–", 1)]
+    else:
+        parts = [text]
+
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return parts[0], None
+
+    """
+    Si no hay subtitle pero el title contiene ':' o '–',
+    divide automáticamente en título y subtítulo.
+    """
+    if subtitle:
+        return title.strip(), subtitle.strip()
+    if not title:
+        return None, None
+    # Detectar separador común
+    if ":" in title:
+        parts = [p.strip() for p in title.split(":", 1)]
+    elif "–" in title:
+        parts = [p.strip() for p in title.split("–", 1)]
+    else:
+        parts = [title.strip()]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return parts[0], None
+
+# ============================================================
+# 🧩 MODELO CANÓNICO
+# ============================================================
+
 def build_dim_book(df):
+    rows = []
 
-    # Normalizaciones
-    df["pub_date_norm"] = df["pub_date"].apply(normalize_date)
-    df["language_norm"] = df["language"].apply(normalize_language)
-    df["price_amount_norm"] = df.apply(lambda x: normalize_price(x["price_amount"]), axis=1)
+    def assign_group(row):
+        isbn13 = str(row.get("isbn13")) if pd.notna(row.get("isbn13")) else None
+        isbn10 = str(row.get("isbn10")) if pd.notna(row.get("isbn10")) else None
+        if isbn13 and isbn13.isdigit() and len(isbn13) == 13:
+            return isbn13
+        if isbn10 and isbn10.isdigit() and len(isbn10) == 10:
+            return isbn10
+        return canonical_id_from_fields(row.get("title"), row.get("authors"), row.get("publisher"))
 
-    # ID canónico
-    df["book_id"] = df.apply(canonical_book_id, axis=1)
+    df["group_id"] = df.apply(assign_group, axis=1)
+    grouped = df.groupby("group_id")
 
-    # Agrupación por ID
-    groups = df.groupby("book_id")
+    for gid, g in grouped:
+        gb = g[g["source"] == "googlebooks"].copy()
+        gr = g[g["source"] == "goodreads"].copy()
 
-    dim_rows = []
+        if len(gb) > 0:
+            gb.loc[:, "pub_tmp"] = gb["pub_date"].apply(normalize_date)
+            gb = gb.sort_values("pub_tmp", ascending=False)
+            winner = gb.iloc[0]
+        else:
+            winner = g.iloc[0]
 
-    for bid, g in groups:
         row = {}
+        title, subtitle = split_title_and_subtitle(winner.get("title"), winner.get("subtitle"))
+        row["book_id"] = gid
+        row["title"] = title
+        row["subtitle"] = subtitle
+        row["publisher"] = clean_publisher(winner.get("publisher"))
 
-        # Reglas de supervivencia
-        priority = ["googlebooks", "goodreads"]
+        isbn13w = winner.get("isbn13")
+        row["isbn13"] = isbn13w if isinstance(isbn13w, (str, int)) and str(isbn13w).isdigit() and len(str(isbn13w)) == 13 else None
+        row["isbn10"] = winner.get("isbn10")
 
-        winner = None
-        for src in priority:
-            if src in g["source"].values:
-                winner = g[g["source"] == src].iloc[0]
-                break
+        pubdate = winner.get("pub_date")
+        if not pubdate:
+            pubdate = next((x for x in g["pub_date"].dropna()), None)
+        row["pub_date_norm"] = normalize_date(pubdate)
 
-        # Campos principales desde el ganador
-        for col in [
-            "title", "subtitle", "publisher", "isbn13", "isbn10",
-            "pub_date_norm", "language_norm", "price_amount_norm"
-        ]:
-            row[col] = winner.get(col)
+        lang = winner.get("language")
+        if not lang or pd.isna(lang):
+            lang = next((x for x in g["language"].dropna()), None)
+        row["language_norm"] = normalize_language(lang)
 
-        # Autores → unión de todas las fuentes
-        all_authors = set()
-        for a in g["authors"].dropna().values:
-            for x in str(a).split(";"):
-                x = x.strip()
-                if x:
-                    all_authors.add(x)
-        row["authors"] = sorted(list(all_authors))
+        price = winner.get("price_amount")
+        if not price:
+            price = next((x for x in g["price_amount"].dropna()), None)
+        row["price_amount_norm"] = normalize_price(price)
+        row["price_currency"] = winner.get("price_currency")
 
-        # Categorías → unión
-        all_cat = set()
-        for c in g["categories"].dropna().values:
-            for x in str(c).split(";"):
-                x = x.strip()
-                if x:
-                    all_cat.add(x)
-        row["categories"] = sorted(list(all_cat))
+        categories = set()
+        for c in g["categories"].dropna():
+            for x in normalize_categories(c):
+                categories.add(x)
+        row["categories"] = sorted(list(categories)) if categories else None
 
-        row["book_id"] = bid
+        authors = set()
+        for a in g["authors"].dropna():
+            for x in normalize_authors(a):
+                authors.add(x)
+        row["authors"] = sorted(list(authors)) if authors else None
+
         row["fuente_ganadora"] = winner["source"]
         row["ts_ultima_actualizacion"] = datetime.now().isoformat()
+        rows.append(row)
 
-        dim_rows.append(row)
-
-    return pd.DataFrame(dim_rows)
-
+    return pd.DataFrame(rows)
 
 # ============================================================
-# 4. GUARDAR ARTEFACTOS
+# 📄 DETALLE DE FUENTES
 # ============================================================
-def save_outputs(dim, detail, quality):
 
-    os.makedirs("standard", exist_ok=True)
-    os.makedirs("docs", exist_ok=True)
-
-    dim.to_parquet(OUT_DIM, index=False)
-    detail.to_parquet(OUT_DETAIL, index=False)
-
-    # Convertir métricas a tipos nativos JSON
-    quality_clean = to_python_native(quality)
-
-    with open(OUT_QUALITY, "w", encoding="utf-8") as f:
-        json.dump(quality_clean, f, indent=4, ensure_ascii=False)
-
-    # Schema en Markdown
-    with open(OUT_SCHEMA, "w", encoding="utf-8") as f:
-        f.write("# Schema del modelo canónico (dim_book)\n\n")
-        f.write("| Campo | Tipo | Null | Descripción |\n")
-        f.write("|-------|------|-------|--------------|\n")
-        for col in dim.columns:
-            f.write(f"| {col} | string | sí | Campo integrado |\n")
-
-    print("[INFO] Archivos generados en /standard y /docs")
-
+def build_book_source_detail(df):
+    df_copy = df.copy()
+    df_copy["authors"] = df_copy["authors"].apply(lambda x: json.dumps(normalize_authors(x), ensure_ascii=False))
+    df_copy["categories"] = df_copy["categories"].apply(lambda x: json.dumps(normalize_categories(x), ensure_ascii=False))
+    return df_copy
 
 # ============================================================
-# MAIN
+# 📊 MÉTRICAS DE CALIDAD
 # ============================================================
+
+def build_quality_metrics(df_dim, df_detail):
+    return {
+        "total_libros_dim": len(df_dim),
+        "total_registros_fuente": len(df_detail),
+        "%isbn13_nulos": float(df_dim["isbn13"].isna().mean()),
+        "%titulos_nulos": float(df_dim["title"].isna().mean()),
+        "%fechas_validas": float(df_dim["pub_date_norm"].notna().mean()),
+        "%idiomas_validos": float(df_dim["language_norm"].notna().mean()),
+        "duplicados_por_isbn13": int(df_dim["isbn13"].duplicated().sum()),
+        "columnas_dim": list(df_dim.columns),
+        "columnas_fuente": list(df_detail.columns),
+        "timestamp": datetime.now().isoformat()
+    }
+
+# ============================================================
+# 💾 GUARDAR SALIDAS
+# ============================================================
+
+def save_outputs(df_dim, df_detail, metrics):
+    os.makedirs(STANDARD_DIR, exist_ok=True)
+    os.makedirs(DOCS_DIR, exist_ok=True)
+
+    pq.write_table(pa.Table.from_pandas(df_dim), f"{STANDARD_DIR}/dim_book.parquet")
+    pq.write_table(pa.Table.from_pandas(df_detail), f"{STANDARD_DIR}/book_source_detail.parquet")
+
+    with open(f"{DOCS_DIR}/quality_metrics.json", "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=4, ensure_ascii=False)
+
+    with open(f"{DOCS_DIR}/schema.md", "w", encoding="utf-8") as f:
+        f.write("# Esquema de dim_book\n\nCampo | Tipo | Descripción\n---|---|---\n")
+        schema = {
+            "book_id": "ID canónico (isbn13, isbn10 o hash)",
+            "title": "Título principal (sin subtítulo)",
+            "subtitle": "Subtítulo separado automáticamente si aplica",
+            "publisher": "Editorial limpia y estandarizada",
+            "isbn13": "Identificador ISBN13",
+            "isbn10": "Identificador ISBN10",
+            "pub_date_norm": "Fecha normalizada ISO-8601 o año",
+            "language_norm": "Idioma BCP-47",
+            "price_amount_norm": "Precio decimal",
+            "price_currency": "Moneda ISO-4217",
+            "categories": "Lista de categorías únicas",
+            "authors": "Autores únicos y limpios",
+            "fuente_ganadora": "Fuente prioritaria (googlebooks/goodreads)",
+            "ts_ultima_actualizacion": "Marca temporal"
+        }
+        for col, desc in schema.items():
+            f.write(f"{col} | {df_dim[col].dtype} | {desc}\n")
+
+    print("\n✔ Archivos generados correctamente en /standard y /docs\n")
+
+# ============================================================
+# 🚀 MAIN
+# ============================================================
+
 if __name__ == "__main__":
+    df_gr, df_gb = load_sources()
+    df_all = pd.concat([df_gr, df_gb], ignore_index=True, sort=False)
 
-    goodreads, google = load_sources()
+    df_all["isbn13"] = (
+        df_all["isbn13"]
+        .astype(str)
+        .str.replace(".0", "", regex=False)
+        .replace("nan", np.nan)
+    )
 
-    detail = build_source_detail(goodreads, google)
+    df_all["pub_date"] = df_all["pub_date"].fillna(df_all.get("publication_date"))
+    df_all["pub_date"] = df_all["pub_date"].fillna(
+        df_all.get("pub_info").astype(str).str.extract(r"(\d{4}-\d{2}-\d{2})", expand=False)
+    )
 
-    dim = build_dim_book(detail)
-
-    quality = compute_quality_metrics(detail, dim)
-
-    save_outputs(dim, detail, quality)
-
-    print("[OK] Integración completada.")
+    df_dim = build_dim_book(df_all)
+    df_detail = build_book_source_detail(df_all)
+    metrics = build_quality_metrics(df_dim, df_detail)
+    save_outputs(df_dim, df_detail, metrics)

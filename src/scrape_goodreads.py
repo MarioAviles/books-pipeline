@@ -2,9 +2,7 @@
 # 📦 Imports y utilidades
 # ===============================================
 from bs4 import BeautifulSoup
-import requests, re, json, time
-import pandas as pd
-
+import requests, re, json, time, os
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -13,18 +11,25 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 
+# ===============================================
+# 🖥️ Navegador sin interfaz (fallback Selenium)
+# ===============================================
 def make_headless_chrome():
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
-
+    opts.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    )
     return webdriver.Chrome(options=opts)
 
 
+# ===============================================
+# 🌍 Constantes
+# ===============================================
 BASE_URL = "https://www.goodreads.com/book/show/"
 
 SESSION = requests.Session()
@@ -34,6 +39,7 @@ SESSION.headers.update({
         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     )
 })
+
 
 # ===============================================
 # 🧱 Dataclass BookData
@@ -45,8 +51,12 @@ class BookData:
 
     title: Optional[str] = None
     authors: List[str] = field(default_factory=list)
+    author_principal: Optional[str] = None
 
     rating_value: Optional[float] = None
+    rating_count: Optional[int] = None
+    review_count: Optional[int] = None
+
     desc: Optional[str] = None
     pub_info: Optional[str] = None
     cover: Optional[str] = None
@@ -62,76 +72,99 @@ class BookData:
     isbn13: Optional[str] = None
     language: Optional[str] = None
 
-    review_count_by_lang: Dict[str, int] = field(default_factory=dict)
     genres: List[str] = field(default_factory=list)
-
-    rating_count: Optional[int] = None
-    review_count: Optional[int] = None
-
-    comments: List[Dict] = field(default_factory=list)
+    review_count_by_lang: Dict[str, int] = field(default_factory=dict)
 
     ingestion_date: Optional[str] = None
 
+
 # ===============================================
-# 🕸️ Parsing básico
+# 🎭 Función para extraer géneros (robusta)
+# ===============================================
+def extract_genres(html: str) -> List[str]:
+    try:
+        block = re.search(r'"bookGenres":(\[.*?\])', html, flags=re.DOTALL)
+        if not block:
+            return []
+        genres_json = json.loads(block.group(1))
+        return [g["genre"]["name"] for g in genres_json]
+    except:
+        return []
+
+
+# ===============================================
+# 🔍 Parseo HTML principal
 # ===============================================
 def parse_basic(html: str, book_id: str) -> BookData:
     soup = BeautifulSoup(html, "html.parser")
 
+    # ---- Título
     title_el = soup.find(class_="Text Text__title1")
     title = title_el.get_text(strip=True) if title_el else None
 
+    # ---- Autores (limpieza + deduplicación)
     authors = [a.get_text(strip=True) for a in soup.find_all(class_="ContributorLink__name")]
+    authors = [re.sub(r"\s+", " ", a).strip() for a in authors]  # limpia espacios dobles
+    authors = list(dict.fromkeys(authors))                       # deduplicación
 
+    # ---- Rating
     rating_el = soup.find(class_="RatingStatistics__rating")
     rating_value = float(rating_el.get_text(strip=True)) if rating_el else None
 
+    # ---- Descripción
     desc_el = soup.find(class_="DetailsLayoutRightParagraph__widthConstrained")
     desc = desc_el.get_text(" ", strip=True) if desc_el else None
 
+    # ---- Información de publicación
     pub_info_el = soup.find("p", {"data-testid": "publicationInfo"})
     pub_info = pub_info_el.get_text(" ", strip=True) if pub_info_el else None
 
+    # ---- Portada
     cover_el = soup.find(class_="ResponsiveImage")
     cover = cover_el.get("src") if cover_el else None
 
+    # ---- rating_count
     rating_count = None
-    review_count = None
     m1 = re.search(r'"ratingCount":(\d+)', html)
-    if m1:
-        rating_count = int(m1.group(1))
-    m2 = re.search(r'"reviewCount":(\d+)', html)
-    if m2:
-        review_count = int(m2.group(1))
+    if m1: rating_count = int(m1.group(1))
 
+    # ---- review_count
+    review_count = None
+    m2 = re.search(r'"reviewCount":(\d+)', html)
+    if m2: review_count = int(m2.group(1))
+
+    # ---- reviews por idioma
     review_count_by_lang = {}
     matches = re.findall(r'"count":(\d+),"isoLanguageCode":"([a-z]{2})"', html)
     for count, lang in matches:
         review_count_by_lang[lang] = review_count_by_lang.get(lang, 0) + int(count)
 
-    genres = []
-    try:
-        block = re.findall(r'"bookGenres":.*?}}],"details":', html, flags=re.DOTALL)[0]
-        block = block.rstrip(',"details":')
-        genres_json = json.loads("{" + block + "}")
-        genres = [g["genre"]["name"] for g in genres_json.get("bookGenres", [])]
-    except:
-        pass
+    # ---- géneros
+    genres = extract_genres(html)
 
     return BookData(
-        id=book_id, url=f"{BASE_URL}{book_id}",
-        title=title, authors=authors,
-        rating_value=rating_value, desc=desc, pub_info=pub_info,
-        cover=cover, review_count_by_lang=review_count_by_lang,
-        genres=genres, rating_count=rating_count, review_count=review_count
+        id=book_id,
+        url=f"{BASE_URL}{book_id}",
+        title=title,
+        authors=authors,
+        author_principal=authors[0] if authors else None,
+        rating_value=rating_value,
+        rating_count=rating_count,
+        review_count=review_count,
+        desc=desc,
+        pub_info=pub_info,
+        cover=cover,
+        review_count_by_lang=review_count_by_lang,
+        genres=genres
     )
 
+
 # ===============================================
-# 🧩 Parse JSON interno de Goodreads
+# 📚 Parseo del JSON interno (details)
 # ===============================================
 def parse_details_from_embedded_json(html: str, bd: BookData) -> BookData:
     try:
-        match = re.search(r'"details"\s*:\s*({.*?})\s*,\s*"work"', html, flags=re.DOTALL)
+        match = re.search(r'"details"\s*:\s*({.*?})\s*,\s*"', html, flags=re.DOTALL)
         if not match:
             return bd
 
@@ -139,167 +172,127 @@ def parse_details_from_embedded_json(html: str, bd: BookData) -> BookData:
 
         bd.format = details.get("format")
         bd.num_pages = details.get("numPages")
-        bd.publication_timestamp = details.get("publicationTime")
-
-        if bd.publication_timestamp:
-            bd.publication_date = datetime.fromtimestamp(
-                bd.publication_timestamp / 1000
-            ).strftime("%Y-%m-%d")
-
         bd.publisher = details.get("publisher")
         bd.isbn = details.get("isbn")
         bd.isbn13 = details.get("isbn13")
 
-        lang = details.get("language") or {}
-        bd.language = lang.get("name") if isinstance(lang, dict) else None
+        ts = details.get("publicationTime")
+        bd.publication_timestamp = ts
+        if ts:
+            bd.publication_date = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
 
+        lang = details.get("language")
+        if isinstance(lang, dict):
+            bd.language = lang.get("name")
+
+        if bd.language:
+            bd.language = bd.language.strip().lower()
+
+        return bd
+
+    except:
+        return bd
+
+
+# ===============================================
+# 🌐 Obtener HTML (Requests + Selenium fallback)
+# ===============================================
+def fetch_book_html(book_id: str) -> Optional[str]:
+    url = f"{BASE_URL}{book_id}"
+
+    # ---- Intento con Requests
+    try:
+        r = SESSION.get(url, timeout=30)
+        if r.status_code == 200:
+            return r.text
     except:
         pass
 
-    return bd
-
-# ===============================================
-# 🌐 Descarga del HTML
-# ===============================================
-def fetch_book_html_requests(book_id: str) -> Optional[str]:
-    url = f"{BASE_URL}{book_id}"
-    print(f"[DEBUG] Descargando libro con Requests: {url}")
-
+    # ---- Fallback Selenium (más lento pero fiable)
     try:
-        r = SESSION.get(url, timeout=30)
-        print(f"[DEBUG] Status code Requests: {r.status_code}")
-
-        if r.status_code == 200:
-            print(f"[DEBUG] HTML recibido correctamente ({len(r.text)} bytes)")
-            return r.text
-        else:
-            print("[WARNING] Requests devolvió un código distinto a 200")
-            return None
-    except Exception as e:
-        print(f"[ERROR] Excepción en Requests: {e}")
-        return None
-
-
-
-def fetch_book_html_selenium(book_id: str) -> Optional[str]:
-    url = f"{BASE_URL}{book_id}"
-    print(f"[DEBUG] Intentando con Selenium: {url}")
-
-    driver = make_headless_chrome()
-    try:
+        driver = make_headless_chrome()
         driver.get(url)
-        time.sleep(2)
+        time.sleep(3)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(1)
         html = driver.page_source
-        print(f"[DEBUG] Selenium devolvió HTML de {len(html)} bytes")
-        return html
-    except Exception as e:
-        print(f"[ERROR] Selenium lanzó excepción: {e}")
-        return None
-    finally:
         driver.quit()
+        return html
+    except:
+        return None
 
 
 # ===============================================
-# 📘 Obtener datos del libro
+# 📘 Obtener datos del libro completo
 # ===============================================
 def get_book(book_id: str) -> BookData:
-    print(f"\n===============================")
-    print(f"[DEBUG] Procesando libro ID: {book_id}")
-    print("===============================")
-
-    html = fetch_book_html_requests(book_id)
-
+    html = fetch_book_html(book_id)
     if html is None:
-        print("[WARNING] Requests falló. Probando Selenium...")
-        html = fetch_book_html_selenium(book_id)
-
-    if html is None:
-        print("[ERROR] No se pudo obtener HTML para este libro.")
         return BookData(id=book_id, url=f"{BASE_URL}{book_id}")
-
-    print("[DEBUG] Parseando datos del libro...")
 
     bd = parse_basic(html, book_id)
     bd = parse_details_from_embedded_json(html, bd)
-
-    print(f"[DEBUG] Título obtenido: {bd.title}")
-    print(f"[DEBUG] Autores: {bd.authors}")
-
     bd.ingestion_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
     return bd
 
 
 # ===============================================
-# 🔍 Extraer IDs desde categoría
+# 🔎 Obtener IDs de libros desde búsqueda
 # ===============================================
-def get_book_ids_from_genre(genre_url: str, limit: int = 15) -> List[str]:
+def get_book_ids_from_search(search_url: str, limit: int = 15) -> List[str]:
     ids = []
     page = 1
 
     while len(ids) < limit:
-        paged_url = f"{genre_url}&page={page}"
-        print(f"[DEBUG] Cargando página {page}: {paged_url}")
-
+        paged_url = f"{search_url}&page={page}"
         r = SESSION.get(paged_url, timeout=30)
-
         if r.status_code != 200:
-            print("[ERROR] No se pudo acceder a la página:", paged_url)
             break
 
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.select("a.bookTitle")
-
-        print(f"[DEBUG] Enlaces encontrados en esta página: {len(links)}")
-
         if not links:
-            print("[WARNING] No hay más resultados en páginas siguientes.")
             break
 
         for link in links:
             href = link.get("href", "")
             m = re.search(r'/book/show/(\d+)', href)
             if m:
-                book_id = m.group(1)
-                if book_id not in ids:
-                    ids.append(book_id)
-
+                ids.append(m.group(1))
                 if len(ids) >= limit:
                     break
 
         page += 1
-        time.sleep(0.5)
+        time.sleep(0.7)  # pausa ética entre páginas
 
-    print(f"[DEBUG] IDs finales ({len(ids)}): {ids}")
     return ids[:limit]
 
-
-import os
 
 # ===============================================
 # 🚀 EJECUCIÓN PRINCIPAL
 # ===============================================
 if __name__ == "__main__":
-    genre_url = f"https://www.goodreads.com/search?q=data+science"
 
-    print("Buscando libros en la categoría...\n")
-    book_ids = get_book_ids_from_genre(genre_url, limit=15)
+    search_url = "https://www.goodreads.com/search?q=data+science"
 
-    print("IDs encontrados:", book_ids, "\n")
+    print("📚 Buscando libros...")
+    book_ids = get_book_ids_from_search(search_url, limit=15)
 
-    print("Scrapeando libros...\n")
-    books = [get_book(bid) for bid in book_ids]
+    print("🔍 IDs obtenidos:", book_ids)
+    print("\n🕸️ Scrapeando libros...\n")
+
+    books = []
+    for bid in book_ids:
+        bd = get_book(bid)
+        books.append(bd)
+        time.sleep(0.8)  # pausa ética requerida
 
     books_json = [asdict(b) for b in books]
 
-    # Crear carpeta landing si no existe
     os.makedirs("landing", exist_ok=True)
-
-    output_path = os.path.join("landing", "goodreads_books.json")
+    output_path = "landing/goodreads_books.json"
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(books_json, f, indent=4, ensure_ascii=False)
 
-    print(f"Scraping completado. Archivo generado: {output_path}")
-
+    print(f"\n✅ Scraping completado. Archivo generado: {output_path}")
