@@ -1,0 +1,10 @@
+{
+    "total_libros_dim": 16,
+    "total_registros_fuente": 29,
+    "%isbn13_nulos": 0.0625,
+    "%titulos_nulos": 0.0,
+    "%fechas_validas": 0.9375,
+    "%idiomas_validos": 0.9375,
+    "duplicados_por_isbn13": 0,
+    "timestamp": "2025-11-19T12:59:56.175363"
+}

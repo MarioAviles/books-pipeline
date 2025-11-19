@@ -1,3 +1,18 @@
+# --- Dependencias para Books-Pipeline ---
+
+# Scraping de Goodreads
 beautifulsoup4
-selenium webdriver-manager
+selenium
+webdriver-manager
+lxml
+
+# Procesamiento y análisis de datos
 pandas
+numpy
+pyarrow
+
+# Enriquecimiento desde Google Books API
+requests
+
+# Utilidades
+python-dotenv

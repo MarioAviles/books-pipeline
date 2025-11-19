@@ -22,80 +22,78 @@ def load_goodreads_json() -> list:
 
 
 # --------------------------------------------------
-# 🔍 Función general de búsqueda + retry inteligente
+# 🔍 Búsqueda en Google Books
 # --------------------------------------------------
-def google_books_search(query: str, retry: int = 2) -> Optional[Dict]:
-    params = {"q": query, "maxResults": 1}
-    print(f"[DEBUG] Google Books Query: {params}")
+def google_books_search_by_isbn(isbn: str) -> Optional[Dict]:
+    api_url = f"{GOOGLE_API_URL}?q=isbn:{isbn}"
+    print(f"[DEBUG] API call: {api_url}")
 
     try:
-        r = requests.get(GOOGLE_API_URL, headers=HEADERS, params=params, timeout=20)
-
+        r = requests.get(api_url, headers=HEADERS, timeout=20)
         if r.status_code != 200:
-            print(f"[WARNING] API error: {r.status_code}")
+            print(f"[WARNING] Error HTTP {r.status_code}")
             return None
 
         data = r.json()
-
-        # Manejo de rate limit
-        if "error" in data and retry > 0:
-            reason = data["error"]["errors"][0].get("reason")
-            if reason == "rateLimitExceeded":
-                print("[WARNING] Rate limit — reintentando...")
-                time.sleep(2)
-                return google_books_search(query, retry - 1)
-
         if "items" not in data:
             return None
 
-        return data["items"][0]
-
+        item = data["items"][0]
+        item["_query_url"] = api_url
+        return item
     except Exception as e:
-        print("[ERROR] Excepción en Google Books:", e)
+        print("[ERROR] Excepción en la búsqueda:", e)
+        return None
+
+
+def google_books_search_fallback(query: str) -> Optional[Dict]:
+    api_url = f"{GOOGLE_API_URL}?q={query}"
+    print(f"[DEBUG] Fallback API call: {api_url}")
+
+    try:
+        r = requests.get(api_url, headers=HEADERS, timeout=20)
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        if "items" not in data:
+            return None
+
+        item = data["items"][0]
+        item["_query_url"] = api_url
+        return item
+    except Exception as e:
+        print("[ERROR] Excepción en fallback:", e)
         return None
 
 
 # --------------------------------------------------
-# 🔎 2. Lógica de búsqueda con fallback
+# 2. Lógica combinada de búsqueda
 # --------------------------------------------------
 def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str, authors: list) -> Optional[Dict]:
+    clean_title = title.replace('"', "").replace("'", "").strip()
+    author = authors[0] if isinstance(authors, list) and authors else ""
 
-    # limpiar título de problemas comunes
-    clean_title = (
-        title.replace('"', "")
-             .replace("'", "")
-             .replace("“", "")
-             .replace("”", "")
-             .strip()
-    )
-
-    primary_author = authors[0] if isinstance(authors, list) and authors else ""
-
-    # 1️⃣ Buscar por ISBN13
     if isbn13:
-        item = google_books_search(f"isbn:{isbn13}")
+        item = google_books_search_by_isbn(isbn13)
         if item:
             return item
-
-    # 2️⃣ Buscar por ISBN10
     if isbn10:
-        item = google_books_search(f"isbn:{isbn10}")
+        item = google_books_search_by_isbn(isbn10)
         if item:
             return item
-
-    # 3️⃣ Título + autor
-    if clean_title and primary_author:
-        item = google_books_search(f'intitle:"{clean_title}" inauthor:"{primary_author}"')
+    if clean_title and author:
+        query = f'intitle:"{clean_title}" inauthor:"{author}"'
+        item = google_books_search_fallback(query)
         if item:
             return item
-
-    # 4️⃣ Solo título
     if clean_title:
-        item = google_books_search(f'intitle:"{clean_title}"')
+        query = f'intitle:"{clean_title}"'
+        item = google_books_search_fallback(query)
         if item:
             return item
 
-    print("[INFO] Sin resultados tras todas las estrategias")
+    print("[INFO] Sin resultados para:", title)
     return None
 
 
@@ -103,47 +101,28 @@ def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str,
 # 3. Extraer campos del JSON de Google Books
 # --------------------------------------------------
 def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
-
     volume = item.get("volumeInfo", {})
     sale = item.get("saleInfo", {})
 
-    # ISBNs
-    isbn13 = None
-    isbn10 = None
-
+    isbn13, isbn10 = None, None
     for entry in volume.get("industryIdentifiers", []):
-        t = entry.get("type")
-        if t == "ISBN_13":
+        if entry.get("type") == "ISBN_13":
             isbn13 = entry.get("identifier")
-        elif t == "ISBN_10":
+        elif entry.get("type") == "ISBN_10":
             isbn10 = entry.get("identifier")
 
-    # Autores
-    authors_raw = volume.get("authors")
-    authors = "; ".join(authors_raw) if isinstance(authors_raw, list) else None
+    authors = "; ".join(volume.get("authors", [])) if "authors" in volume else None
+    categories = "; ".join(volume.get("categories", [])) if "categories" in volume else None
 
-    # Categorías
-    cats_raw = volume.get("categories", [])
-    if isinstance(cats_raw, list):
-        cats_clean = [c for c in cats_raw if isinstance(c, str)]
-        categories = "; ".join(cats_clean) if cats_clean else None
-    else:
-        categories = None
-
-    # Precio
-    price_amount = None
-    price_currency = None
-
+    price_amount, price_currency = None, None
     if sale.get("saleability") == "FOR_SALE":
         price = sale.get("retailPrice", {})
-        raw_amount = price.get("amount")
-        if isinstance(raw_amount, str):
-            raw_amount = raw_amount.replace(",", ".")
-        try:
-            price_amount = float(raw_amount)
-        except:
-            price_amount = None
+        price_amount = price.get("amount")
         price_currency = price.get("currencyCode")
+
+    info_link = volume.get("infoLink")
+    canonical_link = volume.get("canonicalVolumeLink")
+    api_query_url = item.get("_query_url")
 
     return {
         "gb_id": item.get("id"),
@@ -158,56 +137,52 @@ def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
         "isbn10": isbn10,
         "price_amount": price_amount,
         "price_currency": price_currency,
+        "info_link": info_link,
+        "canonical_link": canonical_link,
+        "api_query_url": api_query_url,
     }
 
 
 # --------------------------------------------------
-# 4. Guardar CSV en landing/
+# 4. Guardar CSV
 # --------------------------------------------------
 def save_googlebooks_csv(rows: list):
     df = pd.DataFrame(rows)
-
-    # orden de columnas consistente
     ordered_cols = [
         "gb_id", "title", "subtitle", "authors", "publisher",
         "pub_date", "language", "categories",
-        "isbn13", "isbn10",
-        "price_amount", "price_currency"
+        "isbn13", "isbn10", "price_amount", "price_currency",
+        "info_link", "canonical_link", "api_query_url"
     ]
-
     df = df.reindex(columns=ordered_cols)
-
+    df = df.drop_duplicates(subset=["isbn13", "title"], keep="first")
     os.makedirs("landing", exist_ok=True)
     df.to_csv(LANDING_PATH, index=False, encoding="utf-8", sep=";")
-
-    print(f"[INFO] Archivo generado: {LANDING_PATH}")
+    print(f"[INFO] Archivo generado sin duplicados: {LANDING_PATH}")
 
 
 # --------------------------------------------------
-# Main
+# MAIN
 # --------------------------------------------------
 if __name__ == "__main__":
-
     goodreads = load_goodreads_json()
+
+    # ✅ Filtrar duplicados antes de consultar la API
+    unique_books = {(b.get("isbn13"), b.get("title")): b for b in goodreads}.values()
+
     enriched_rows = []
-
-    for book in goodreads:
-        print("\n============================================")
-        print(f"[INFO] Procesando: {book.get('title')}")
-
+    for book in unique_books:
+        print(f"\n📘 Procesando: {book.get('title')}")
         isbn13 = book.get("isbn13")
-        isbn10_raw = book.get("isbn")
-        isbn10 = isbn10_raw if isbn10_raw and str(isbn10_raw).strip() else None
-
+        isbn10 = book.get("isbn")
         title = book.get("title", "")
         authors = book.get("authors", [])
 
         item = query_google_books(isbn13, isbn10, title, authors)
-        time.sleep(0.4)
-
+        time.sleep(0.5)
         if item:
             enriched_rows.append(extract_googlebooks_fields(item))
         else:
-            print("[INFO] Libro sin coincidencia en Google Books → se omite")
+            print("[INFO] Libro sin coincidencia en Google Books → omitido")
 
     save_googlebooks_csv(enriched_rows)
