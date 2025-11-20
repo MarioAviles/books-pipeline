@@ -19,9 +19,13 @@ BOOKS-PIPELINE/
 ├── 📂 src/
 │ ├── enrich_googlebooks.py → enriquece los libros de Goodreads usando Google Books API
 │ ├── integrate_pipeline.py → integra y normaliza todas las fuentes en un modelo canónico
-│ ├── scrape_goodreads.py → scraping o extracción desde Goodreads
-│ ├── utils_isbn.py → utilidades para normalización y validación de ISBN
-│ └── utils_quality.py → cálculo de métricas de calidad
+│ ├── scrape_goodreads.py → extracción (scraping) desde Goodreads
+│ │
+│ └── 📂 utils/
+│   ├── init.py → marca el paquete como importable
+│   ├── utils_isbn.py → generación y validación de IDs canónicos (ISBN o hash)
+│   ├── utils_normalize.py → funciones de limpieza y normalización de datos
+│   └── utils_quality.py → cálculo de métricas y validaciones de calidad
 │
 ├── 📂 standard/
 │ ├── dim_book.parquet → tabla maestra de libros (modelo canónico)
@@ -91,15 +95,24 @@ python src/integrate_pipeline.py
 
 #### 🧼 Limpieza automática de publisher
 
-La función clean_publisher() normaliza dinámicamente nombres de editoriales eliminando sufijos como Inc., Ltd., & Sons, Press, etc.
+La función clean_publisher() normaliza los nombres de editoriales eliminando sufijos como Inc., Ltd., & Sons, Press, Media, etc.
+Otras funciones en utils_normalize.py aseguran coherencia en autores, fechas, idiomas y precios.
 
 #### 🧰 Scripts auxiliares
 
-utils_isbn.py: validación y normalización de ISBN10/ISBN13.
+utils_isbn.py: Genera y valida identificadores canónicos (ISBN13 o hash SHA1).
 
-utils_quality.py: cálculo de porcentajes de completitud y duplicados.
+utils_normalize.py: Limpieza de editoriales, autores, categorías, fechas, idiomas y precios.
 
-scrape_goodreads.py: permite obtener el JSON original de Goodreads.
+utils_quality.py: Calcula métricas de completitud, duplicados y calidad general.
+
+scrape_goodreads.py: Obtiene la fuente bruta de libros desde Goodreads.
+
+enrich_googlebooks.py: Enriquecimiento de datos usando Google Books API.
+
+integrate_pipeline.py: Une, limpia y estandariza las fuentes para generar el modelo final.
+
+
 
 # Esquema de dim_book
 

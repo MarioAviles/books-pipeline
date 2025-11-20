@@ -1,10 +1,23 @@
 {
-    "total_libros_dim": 16,
-    "total_registros_fuente": 29,
-    "%isbn13_nulos": 0.0625,
-    "%titulos_nulos": 0.0,
-    "%fechas_validas": 0.9375,
-    "%idiomas_validos": 0.9375,
+    "total_fuente_goodreads": 15,
+    "total_fuente_googlebooks": 14,
+    "unique_books_dim": 16,
     "duplicados_por_isbn13": 0,
-    "timestamp": "2025-11-19T12:59:56.175363"
+    "nulos_por_campo_dim": {
+        "book_id": 0.0,
+        "title": 0.0,
+        "subtitle": 0.25,
+        "publisher": 0.1875,
+        "isbn13": 0.0625,
+        "isbn10": 0.125,
+        "pub_date_norm": 0.0625,
+        "language_norm": 0.0625,
+        "price_amount_norm": 0.875,
+        "price_currency": 0.875,
+        "categories": 0.1875,
+        "authors": 0.0,
+        "fuente_ganadora": 0.0,
+        "ts_ultima_actualizacion": 0.0
+    },
+    "timestamp": "2025-11-20T10:39:41.735311"
 }

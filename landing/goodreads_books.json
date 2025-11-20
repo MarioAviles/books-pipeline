@@ -46,7 +46,7 @@
             "az": 1,
             "de": 1
         },
-        "ingestion_date": "2025-11-19 12:58:18"
+        "ingestion_date": "2025-11-20 10:22:07"
     },
     {
         "id": "17682206",
@@ -87,7 +87,7 @@
             "es": 1,
             "fa": 1
         },
-        "ingestion_date": "2025-11-19 12:58:22"
+        "ingestion_date": "2025-11-20 10:22:10"
     },
     {
         "id": "25407018",
@@ -129,7 +129,7 @@
             "ru": 1,
             "pt": 3
         },
-        "ingestion_date": "2025-11-19 12:58:24"
+        "ingestion_date": "2025-11-20 10:22:12"
     },
     {
         "id": "205905685",
@@ -140,7 +140,7 @@
         ],
         "author_principal": "Sandra Matz",
         "rating_value": 4.04,
-        "rating_count": 289,
+        "rating_count": 290,
         "review_count": 63,
         "desc": "A refreshingly relatable exploration of how algorithms penetrate the most intimate aspects of our psychology, and how we can regain mastery over our lives—from the pioneering expert of psychological targeting. There are more digital pieces of data than stars in the universe. This data helps us monitor our planet, decipher our genetic code, and take a deep dive into our psychology. As algorithms become increasingly adept at accessing our minds, they also become more and more powerful at controlling it—enticing us to buy a certain product or vote for a certain political candidate. Some of us say this technological trend is no big deal. Others consider it one of the greatest threats to humanity. But what if the truth is more nuanced and mind-bending than that? In Mindmasters, Columbia Business School professor Sandra Matz offers a fascinating insider perspective on the art and data-driven science of psychological targeting. By relating her own personal story of growing up in a small village—where few aspects of life remain truly private—to her groundbreaking research in computational psychology, Matz reveals how Big Data offers insights into the most intimate aspects of our psyche and how these insights empower external influence over the choices we make. Filled with Ted-Talk-like explanations and real-life examples from Matz's research and consulting work, Mindmasters paints a nuanced picture of the power of psychological targeting. Like nosy neighbors, it can be creepy, manipulative, and downright harmful—with scandals like Cambridge Analytica being merely the tip of the iceberg. Yet, like any tight-knit, supportive village community, it also holds enormous potential to help us live healthier and happier lives—for example, by improving our mental health, encouraging better financial decisions, or enabling us to break out of our echo chambers. With passion and clear-eyed precision, Matz shows us how to manage psychological targeting and redesign the data game in a way that empowers us to take back control and ask more of our personal data. Mindmasters is a riveting look at what our digital footprints reveal about us, how they're being used—for good and for ill—and how we can gain more control and power over the data that define us.",
         "pub_info": "Published January 7, 2025",
@@ -167,7 +167,7 @@
         "review_count_by_lang": {
             "en": 62
         },
-        "ingestion_date": "2025-11-19 12:58:27"
+        "ingestion_date": "2025-11-20 10:22:14"
     },
     {
         "id": "33399049",
@@ -212,7 +212,7 @@
             "it": 1,
             "nl": 1
         },
-        "ingestion_date": "2025-11-19 12:58:30"
+        "ingestion_date": "2025-11-20 10:22:17"
     },
     {
         "id": "17346997",
@@ -254,7 +254,49 @@
             "en": 50,
             "nl": 1
         },
-        "ingestion_date": "2025-11-19 12:58:33"
+        "ingestion_date": "2025-11-20 10:22:20"
+    },
+    {
+        "id": "26457146",
+        "url": "https://www.goodreads.com/book/show/26457146",
+        "title": "Python Data Science Handbook: Essential Tools for Working with Data",
+        "authors": [
+            "Jake VanderPlas"
+        ],
+        "author_principal": "Jake VanderPlas",
+        "rating_value": 4.3,
+        "rating_count": 661,
+        "review_count": 63,
+        "desc": "For many researchers, Python is a first-class tool mainly because of its libraries for storing, manipulating, and gaining insight from data. Several resources exist for individual pieces of this data science stack, but only with the Python Data Science Handbook do you get them all—IPython, NumPy, Pandas, Matplotlib, Scikit-Learn, and other related tools. Working scientists and data crunchers familiar with reading and writing Python code will find this comprehensive desk reference ideal for tackling day-to-day manipulating, transforming, and cleaning data; visualizing different types of data; and using data to build statistical or machine learning models. Quite simply, this is the must-have reference for scientific computing in Python. With this handbook, you’ll learn how to",
+        "pub_info": "First published March 25, 2016",
+        "cover": "https://m.media-amazon.com/images/S/compressed.photo.goodreads.com/books/1481029785i/26457146.jpg",
+        "format": "Paperback",
+        "num_pages": 546,
+        "publication_timestamp": 1483430400000,
+        "publication_date": "2017-01-03",
+        "publisher": "O'Reilly Media",
+        "isbn": "1491912057",
+        "isbn13": "9781491912058",
+        "language": "english",
+        "genres": [
+            "Programming",
+            "Computer Science",
+            "Nonfiction",
+            "Technical",
+            "Reference",
+            "Technology",
+            "Coding",
+            "Artificial Intelligence",
+            "Textbooks",
+            "Science"
+        ],
+        "review_count_by_lang": {
+            "en": 56,
+            "ru": 2,
+            "id": 1,
+            "es": 1
+        },
+        "ingestion_date": "2025-11-20 10:22:22"
     },
     {
         "id": "34213247",
@@ -298,49 +340,7 @@
             "es": 1,
             "uk": 2
         },
-        "ingestion_date": "2025-11-19 12:58:36"
-    },
-    {
-        "id": "26457146",
-        "url": "https://www.goodreads.com/book/show/26457146",
-        "title": "Python Data Science Handbook: Essential Tools for Working with Data",
-        "authors": [
-            "Jake VanderPlas"
-        ],
-        "author_principal": "Jake VanderPlas",
-        "rating_value": 4.3,
-        "rating_count": 661,
-        "review_count": 63,
-        "desc": "For many researchers, Python is a first-class tool mainly because of its libraries for storing, manipulating, and gaining insight from data. Several resources exist for individual pieces of this data science stack, but only with the Python Data Science Handbook do you get them all—IPython, NumPy, Pandas, Matplotlib, Scikit-Learn, and other related tools. Working scientists and data crunchers familiar with reading and writing Python code will find this comprehensive desk reference ideal for tackling day-to-day manipulating, transforming, and cleaning data; visualizing different types of data; and using data to build statistical or machine learning models. Quite simply, this is the must-have reference for scientific computing in Python. With this handbook, you’ll learn how to",
-        "pub_info": "First published March 25, 2016",
-        "cover": "https://m.media-amazon.com/images/S/compressed.photo.goodreads.com/books/1481029785i/26457146.jpg",
-        "format": "Paperback",
-        "num_pages": 546,
-        "publication_timestamp": 1483430400000,
-        "publication_date": "2017-01-03",
-        "publisher": "O'Reilly Media",
-        "isbn": "1491912057",
-        "isbn13": "9781491912058",
-        "language": "english",
-        "genres": [
-            "Programming",
-            "Computer Science",
-            "Nonfiction",
-            "Technical",
-            "Reference",
-            "Technology",
-            "Coding",
-            "Artificial Intelligence",
-            "Textbooks",
-            "Science"
-        ],
-        "review_count_by_lang": {
-            "en": 56,
-            "ru": 2,
-            "id": 1,
-            "es": 1
-        },
-        "ingestion_date": "2025-11-19 12:58:39"
+        "ingestion_date": "2025-11-20 10:22:24"
     },
     {
         "id": "36722689",
@@ -385,7 +385,7 @@
             "fi": 2,
             "ar": 1
         },
-        "ingestion_date": "2025-11-19 12:58:41"
+        "ingestion_date": "2025-11-20 10:22:27"
     },
     {
         "id": "56357967",
@@ -427,7 +427,7 @@
             "en": 48,
             "de": 1
         },
-        "ingestion_date": "2025-11-19 12:58:44"
+        "ingestion_date": "2025-11-20 10:22:29"
     },
     {
         "id": "56751800",
@@ -437,8 +437,8 @@
             "Lillian Pierson"
         ],
         "author_principal": "Lillian Pierson",
-        "rating_value": 3.41,
-        "rating_count": 264,
+        "rating_value": 3.4,
+        "rating_count": 263,
         "review_count": 29,
         "desc": "Monetize your company’s data and data science expertise without spending a fortune on hiring independent strategy consultants to help What if there was one simple, clear process for ensuring that all your company’s data science projects achieve a high a return on investment? What if you could validate your ideas for future data science projects, and select the one idea that’s most prime for achieving profitability while also moving your company closer to its business vision? There is. Industry-acclaimed data science consultant, Lillian Pierson, shares her proprietary STAR Framework – A simple, proven process for leading profit-forming data science projects. Not sure what data science is yet? Don’t worry! Parts 1 and 2 of Data Science For Dummies will get all the bases covered for you. And if you’re already a data science expert? Then you really won’t want to miss the data science strategy and data monetization gems that are shared in Part 3 onward throughout this book. Data Science For Dummies demonstrates: Whether you’re new to the data science field or already a decade in, you’re sure to learn something new and incredibly valuable from Data Science For Dummies. Discover how to generate massive business wins from your company’s data by picking up your copy today.",
         "pub_info": "Published September 15, 2021",
@@ -466,7 +466,7 @@
         "review_count_by_lang": {
             "en": 29
         },
-        "ingestion_date": "2025-11-19 12:58:47"
+        "ingestion_date": "2025-11-20 10:22:32"
     },
     {
         "id": "58949285",
@@ -505,7 +505,7 @@
         "review_count_by_lang": {
             "en": 15
         },
-        "ingestion_date": "2025-11-19 12:58:49"
+        "ingestion_date": "2025-11-20 10:22:34"
     },
     {
         "id": "26299386",
@@ -546,7 +546,7 @@
             "en": 38,
             "pt": 1
         },
-        "ingestion_date": "2025-11-19 12:58:53"
+        "ingestion_date": "2025-11-20 10:22:36"
     },
     {
         "id": "13638556",
@@ -585,7 +585,7 @@
         "review_count_by_lang": {
             "en": 38
         },
-        "ingestion_date": "2025-11-19 12:58:57"
+        "ingestion_date": "2025-11-20 10:22:39"
     },
     {
         "id": "57182112",
@@ -618,6 +618,6 @@
             "en": 6,
             "pt": 1
         },
-        "ingestion_date": "2025-11-19 12:59:00"
+        "ingestion_date": "2025-11-20 10:22:41"
     }
 ]

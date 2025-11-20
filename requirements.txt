@@ -2,17 +2,13 @@
 
 # Scraping de Goodreads
 beautifulsoup4
-selenium
-webdriver-manager
 lxml
+requests
 
 # Procesamiento y análisis de datos
 pandas
 numpy
 pyarrow
-
-# Enriquecimiento desde Google Books API
-requests
 
 # Utilidades
 python-dotenv
