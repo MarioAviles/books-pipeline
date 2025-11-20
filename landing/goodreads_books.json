@@ -46,7 +46,7 @@
             "az": 1,
             "de": 1
         },
-        "ingestion_date": "2025-11-20 10:22:07"
+        "ingestion_date": "2025-11-20 12:37:01"
     },
     {
         "id": "17682206",
@@ -87,7 +87,7 @@
             "es": 1,
             "fa": 1
         },
-        "ingestion_date": "2025-11-20 10:22:10"
+        "ingestion_date": "2025-11-20 12:37:04"
     },
     {
         "id": "25407018",
@@ -129,7 +129,7 @@
             "ru": 1,
             "pt": 3
         },
-        "ingestion_date": "2025-11-20 10:22:12"
+        "ingestion_date": "2025-11-20 12:37:07"
     },
     {
         "id": "205905685",
@@ -167,7 +167,7 @@
         "review_count_by_lang": {
             "en": 62
         },
-        "ingestion_date": "2025-11-20 10:22:14"
+        "ingestion_date": "2025-11-20 12:37:10"
     },
     {
         "id": "33399049",
@@ -212,7 +212,7 @@
             "it": 1,
             "nl": 1
         },
-        "ingestion_date": "2025-11-20 10:22:17"
+        "ingestion_date": "2025-11-20 12:37:13"
     },
     {
         "id": "17346997",
@@ -254,49 +254,7 @@
             "en": 50,
             "nl": 1
         },
-        "ingestion_date": "2025-11-20 10:22:20"
-    },
-    {
-        "id": "26457146",
-        "url": "https://www.goodreads.com/book/show/26457146",
-        "title": "Python Data Science Handbook: Essential Tools for Working with Data",
-        "authors": [
-            "Jake VanderPlas"
-        ],
-        "author_principal": "Jake VanderPlas",
-        "rating_value": 4.3,
-        "rating_count": 661,
-        "review_count": 63,
-        "desc": "For many researchers, Python is a first-class tool mainly because of its libraries for storing, manipulating, and gaining insight from data. Several resources exist for individual pieces of this data science stack, but only with the Python Data Science Handbook do you get them all—IPython, NumPy, Pandas, Matplotlib, Scikit-Learn, and other related tools. Working scientists and data crunchers familiar with reading and writing Python code will find this comprehensive desk reference ideal for tackling day-to-day manipulating, transforming, and cleaning data; visualizing different types of data; and using data to build statistical or machine learning models. Quite simply, this is the must-have reference for scientific computing in Python. With this handbook, you’ll learn how to",
-        "pub_info": "First published March 25, 2016",
-        "cover": "https://m.media-amazon.com/images/S/compressed.photo.goodreads.com/books/1481029785i/26457146.jpg",
-        "format": "Paperback",
-        "num_pages": 546,
-        "publication_timestamp": 1483430400000,
-        "publication_date": "2017-01-03",
-        "publisher": "O'Reilly Media",
-        "isbn": "1491912057",
-        "isbn13": "9781491912058",
-        "language": "english",
-        "genres": [
-            "Programming",
-            "Computer Science",
-            "Nonfiction",
-            "Technical",
-            "Reference",
-            "Technology",
-            "Coding",
-            "Artificial Intelligence",
-            "Textbooks",
-            "Science"
-        ],
-        "review_count_by_lang": {
-            "en": 56,
-            "ru": 2,
-            "id": 1,
-            "es": 1
-        },
-        "ingestion_date": "2025-11-20 10:22:22"
+        "ingestion_date": "2025-11-20 12:37:16"
     },
     {
         "id": "34213247",
@@ -340,7 +298,49 @@
             "es": 1,
             "uk": 2
         },
-        "ingestion_date": "2025-11-20 10:22:24"
+        "ingestion_date": "2025-11-20 12:37:20"
+    },
+    {
+        "id": "26457146",
+        "url": "https://www.goodreads.com/book/show/26457146",
+        "title": "Python Data Science Handbook: Essential Tools for Working with Data",
+        "authors": [
+            "Jake VanderPlas"
+        ],
+        "author_principal": "Jake VanderPlas",
+        "rating_value": 4.3,
+        "rating_count": 661,
+        "review_count": 63,
+        "desc": "For many researchers, Python is a first-class tool mainly because of its libraries for storing, manipulating, and gaining insight from data. Several resources exist for individual pieces of this data science stack, but only with the Python Data Science Handbook do you get them all—IPython, NumPy, Pandas, Matplotlib, Scikit-Learn, and other related tools. Working scientists and data crunchers familiar with reading and writing Python code will find this comprehensive desk reference ideal for tackling day-to-day manipulating, transforming, and cleaning data; visualizing different types of data; and using data to build statistical or machine learning models. Quite simply, this is the must-have reference for scientific computing in Python. With this handbook, you’ll learn how to",
+        "pub_info": "First published March 25, 2016",
+        "cover": "https://m.media-amazon.com/images/S/compressed.photo.goodreads.com/books/1481029785i/26457146.jpg",
+        "format": "Paperback",
+        "num_pages": 546,
+        "publication_timestamp": 1483430400000,
+        "publication_date": "2017-01-03",
+        "publisher": "O'Reilly Media",
+        "isbn": "1491912057",
+        "isbn13": "9781491912058",
+        "language": "english",
+        "genres": [
+            "Programming",
+            "Computer Science",
+            "Nonfiction",
+            "Technical",
+            "Reference",
+            "Technology",
+            "Coding",
+            "Artificial Intelligence",
+            "Textbooks",
+            "Science"
+        ],
+        "review_count_by_lang": {
+            "en": 56,
+            "ru": 2,
+            "id": 1,
+            "es": 1
+        },
+        "ingestion_date": "2025-11-20 12:37:23"
     },
     {
         "id": "36722689",
@@ -385,7 +385,7 @@
             "fi": 2,
             "ar": 1
         },
-        "ingestion_date": "2025-11-20 10:22:27"
+        "ingestion_date": "2025-11-20 12:37:26"
     },
     {
         "id": "56357967",
@@ -427,7 +427,7 @@
             "en": 48,
             "de": 1
         },
-        "ingestion_date": "2025-11-20 10:22:29"
+        "ingestion_date": "2025-11-20 12:37:29"
     },
     {
         "id": "56751800",
@@ -466,7 +466,7 @@
         "review_count_by_lang": {
             "en": 29
         },
-        "ingestion_date": "2025-11-20 10:22:32"
+        "ingestion_date": "2025-11-20 12:37:34"
     },
     {
         "id": "58949285",
@@ -505,7 +505,7 @@
         "review_count_by_lang": {
             "en": 15
         },
-        "ingestion_date": "2025-11-20 10:22:34"
+        "ingestion_date": "2025-11-20 12:37:36"
     },
     {
         "id": "26299386",
@@ -546,7 +546,7 @@
             "en": 38,
             "pt": 1
         },
-        "ingestion_date": "2025-11-20 10:22:36"
+        "ingestion_date": "2025-11-20 12:37:39"
     },
     {
         "id": "13638556",
@@ -585,7 +585,7 @@
         "review_count_by_lang": {
             "en": 38
         },
-        "ingestion_date": "2025-11-20 10:22:39"
+        "ingestion_date": "2025-11-20 12:37:42"
     },
     {
         "id": "57182112",
@@ -618,6 +618,6 @@
             "en": 6,
             "pt": 1
         },
-        "ingestion_date": "2025-11-20 10:22:41"
+        "ingestion_date": "2025-11-20 12:37:44"
     }
 ]

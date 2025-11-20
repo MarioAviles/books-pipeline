@@ -75,12 +75,9 @@ def build_dim_book(df):
 
     for gid, g in grouped:
         gb = g[g["source"] == "googlebooks"].copy()
-        if len(gb) > 0:
-            gb.loc[:, "pub_tmp"] = gb["pub_date"].apply(normalize_date)
-            gb = gb.sort_values("pub_tmp", ascending=False)
-            winner = gb.iloc[0]
-        else:
-            winner = g.iloc[0]
+        g["completitud"] = g.notna().sum(axis=1)
+        winner = g.sort_values("completitud", ascending=False).iloc[0]
+
 
         row = {}
         title, subtitle = split_title_and_subtitle(winner.get("title"), winner.get("subtitle"))

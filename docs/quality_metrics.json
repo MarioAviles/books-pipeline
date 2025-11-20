@@ -6,18 +6,18 @@
     "nulos_por_campo_dim": {
         "book_id": 0.0,
         "title": 0.0,
-        "subtitle": 0.25,
-        "publisher": 0.1875,
+        "subtitle": 0.1875,
+        "publisher": 0.0,
         "isbn13": 0.0625,
-        "isbn10": 0.125,
-        "pub_date_norm": 0.0625,
-        "language_norm": 0.0625,
-        "price_amount_norm": 0.875,
-        "price_currency": 0.875,
+        "isbn10": 0.75,
+        "pub_date_norm": 0.0,
+        "language_norm": 0.125,
+        "price_amount_norm": 0.9375,
+        "price_currency": 0.9375,
         "categories": 0.1875,
         "authors": 0.0,
         "fuente_ganadora": 0.0,
         "ts_ultima_actualizacion": 0.0
     },
-    "timestamp": "2025-11-20T10:39:41.735311"
+    "timestamp": "2025-11-20T12:44:59.428577"
 }
