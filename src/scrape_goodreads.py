@@ -27,35 +27,82 @@ SESSION.headers.update({
 class BookData:
     id: str
     url: str
-
     title: Optional[str] = None
     authors: List[str] = field(default_factory=list)
-    author_principal: Optional[str] = None
 
     rating_value: Optional[float] = None
     rating_count: Optional[int] = None
-    review_count: Optional[int] = None
 
-    desc: Optional[str] = None
-    pub_info: Optional[str] = None
-    cover: Optional[str] = None
+    isbn: Optional[str] = None
+    isbn13: Optional[str] = None
 
     format: Optional[str] = None
     num_pages: Optional[int] = None
+    publisher: Optional[str] = None
     publication_timestamp: Optional[int] = None
     publication_date: Optional[str] = None
-    publisher: Optional[str] = None
-    isbn: Optional[str] = None
-    isbn13: Optional[str] = None
     language: Optional[str] = None
 
     genres: List[str] = field(default_factory=list)
-    review_count_by_lang: Dict[str, int] = field(default_factory=dict)
+    description: Optional[str] = None
+
     ingestion_date: Optional[str] = None
 
 
 # ===============================================
-# 🎭 Función para extraer géneros
+# 🧱 Extraer descripción
+# ===============================================
+def extract_description(html: str) -> Optional[str]:
+    # 1) React __NEXT_DATA__
+    try:
+        m = re.search(r'<script id="__NEXT_DATA__".*?>(.*?)</script>',
+                      html, flags=re.DOTALL)
+        if m:
+            data = json.loads(m.group(1))
+
+            def find_desc(obj):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k.lower() == "description" and isinstance(v, str) and v.strip():
+                            return v
+                        r = find_desc(v)
+                        if r:
+                            return r
+                elif isinstance(obj, list):
+                    for item in obj:
+                        r = find_desc(item)
+                        if r:
+                            return r
+                return None
+
+            desc = find_desc(data)
+            if desc:
+                return desc.strip()
+
+    except:
+        pass
+
+    # 2) ld+json
+    try:
+        blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>',
+                            html, flags=re.DOTALL)
+        for block in blocks:
+            try:
+                d = json.loads(block)
+                if isinstance(d, dict) and "description" in d:
+                    desc = d["description"]
+                    if isinstance(desc, str) and desc.strip():
+                        return desc.strip()
+            except:
+                continue
+    except:
+        pass
+
+    return None
+
+
+# ===============================================
+# 🎭 Extraer géneros
 # ===============================================
 def extract_genres(html: str) -> List[str]:
     try:
@@ -69,56 +116,38 @@ def extract_genres(html: str) -> List[str]:
 
 
 # ===============================================
-# 🔍 Parseo HTML principal
+# 🔍 Parseo principal
 # ===============================================
 def parse_basic(html: str, book_id: str) -> BookData:
     soup = BeautifulSoup(html, "html.parser")
 
-    title = soup.find(class_="Text Text__title1")
-    title = title.get_text(strip=True) if title else None
+    title_el = soup.find(class_="Text Text__title1")
+    title = title_el.get_text(strip=True) if title_el else None
 
     authors = [a.get_text(strip=True) for a in soup.find_all(class_="ContributorLink__name")]
-    authors = [re.sub(r"\s+", " ", a).strip() for a in authors]
-    authors = list(dict.fromkeys(authors))
+    authors = list(dict.fromkeys(authors)) if authors else []
 
     rating_el = soup.find(class_="RatingStatistics__rating")
     rating_value = float(rating_el.get_text(strip=True)) if rating_el else None
 
-    desc_el = soup.find(class_="DetailsLayoutRightParagraph__widthConstrained")
-    desc = desc_el.get_text(" ", strip=True) if desc_el else None
+    rating_count_match = re.search(r'"ratingCount"\s*:\s*"?(?P<num>[\d,\.]+)"?', html)
+    rating_count = int(re.sub(r"[^\d]", "", rating_count_match.group("num"))) if rating_count_match else None
 
-    pub_info_el = soup.find("p", {"data-testid": "publicationInfo"})
-    pub_info = pub_info_el.get_text(" ", strip=True) if pub_info_el else None
+    isbn10_match = re.search(r'"isbn":"([0-9Xx]{10})"', html)
+    isbn13_match = re.search(r'"isbn13":"(\d{13})"', html)
 
-    cover_el = soup.find(class_="ResponsiveImage")
-    cover = cover_el.get("src") if cover_el else None
-
-    rating_count = re.search(r'"ratingCount":(\d+)', html)
-    review_count = re.search(r'"reviewCount":(\d+)', html)
-    rating_count = int(rating_count.group(1)) if rating_count else None
-    review_count = int(review_count.group(1)) if review_count else None
-
-    review_count_by_lang = {}
-    matches = re.findall(r'"count":(\d+),"isoLanguageCode":"([a-z]{2})"', html)
-    for count, lang in matches:
-        review_count_by_lang[lang] = review_count_by_lang.get(lang, 0) + int(count)
-
-    genres = extract_genres(html)
+    isbn10 = isbn10_match.group(1) if isbn10_match else None
+    isbn13 = isbn13_match.group(1) if isbn13_match else None
 
     return BookData(
         id=book_id,
         url=f"{BASE_URL}{book_id}",
         title=title,
         authors=authors,
-        author_principal=authors[0] if authors else None,
         rating_value=rating_value,
         rating_count=rating_count,
-        review_count=review_count,
-        desc=desc,
-        pub_info=pub_info,
-        cover=cover,
-        review_count_by_lang=review_count_by_lang,
-        genres=genres
+        isbn=isbn10,
+        isbn13=isbn13,
     )
 
 
@@ -136,8 +165,9 @@ def parse_details_from_embedded_json(html: str, bd: BookData) -> BookData:
         bd.format = details.get("format")
         bd.num_pages = details.get("numPages")
         bd.publisher = details.get("publisher")
-        bd.isbn = details.get("isbn")
-        bd.isbn13 = details.get("isbn13")
+
+        bd.isbn = details.get("isbn") or bd.isbn
+        bd.isbn13 = details.get("isbn13") or bd.isbn13
 
         ts = details.get("publicationTime")
         bd.publication_timestamp = ts
@@ -155,17 +185,15 @@ def parse_details_from_embedded_json(html: str, bd: BookData) -> BookData:
 
 
 # ===============================================
-# 🌐 Obtener HTML (solo Requests)
+# 🌐 Obtener HTML del libro
 # ===============================================
 def fetch_book_html(book_id: str) -> Optional[str]:
-    url = f"{BASE_URL}{book_id}"
     try:
-        r = SESSION.get(url, timeout=30)
+        r = SESSION.get(f"{BASE_URL}{book_id}", timeout=30)
         if r.status_code == 200:
             return r.text
-        print(f"[WARNING] Código HTTP {r.status_code} para {url}")
-    except Exception as e:
-        print(f"[ERROR] No se pudo obtener {url}: {e}")
+    except:
+        pass
     return None
 
 
@@ -179,61 +207,75 @@ def get_book(book_id: str) -> BookData:
 
     bd = parse_basic(html, book_id)
     bd = parse_details_from_embedded_json(html, bd)
+    bd.genres = extract_genres(html)
+    bd.description = extract_description(html)
     bd.ingestion_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return bd
 
 
 # ===============================================
-# 🔎 Obtener IDs de libros desde búsqueda
+# 🔎 Obtener IDs de libro de la búsqueda
 # ===============================================
-def get_book_ids_from_search(search_url: str, limit: int = 15) -> List[str]:
+def get_book_ids_from_search(search_url: str, limit: int = 20) -> List[str]:
     ids = []
+    seen = set()
     page = 1
+
+    print("📚 Buscando libros...")
+
     while len(ids) < limit:
-        paged_url = f"{search_url}&page={page}"
-        r = SESSION.get(paged_url, timeout=30)
+        paged = f"{search_url}&page={page}"
+        print(f"[INFO] Página {page}: {paged}")
+
+        r = SESSION.get(paged, timeout=30)
         if r.status_code != 200:
             break
 
         soup = BeautifulSoup(r.text, "html.parser")
-        links = soup.select("a.bookTitle")
+
+        # Capturar MUCHOS más enlaces
+        links = soup.select('a[href*="/book/show/"]')
         if not links:
             break
 
-        for link in links:
-            href = link.get("href", "")
+        for l in links:
+            href = l.get("href", "")
             m = re.search(r'/book/show/(\d+)', href)
             if m:
-                ids.append(m.group(1))
-                if len(ids) >= limit:
-                    break
+                bid = m.group(1)
+                if bid not in seen:
+                    seen.add(bid)
+                    ids.append(bid)
+                    print(" ➕ Nuevo ID:", bid)
+                    if len(ids) >= limit:
+                        break
 
         page += 1
         time.sleep(0.7)
+
+    print("📌 IDs finales:", ids)
     return ids[:limit]
 
 
 # ===============================================
-# 🚀 EJECUCIÓN PRINCIPAL
+# 🚀 MAIN
 # ===============================================
 if __name__ == "__main__":
     search_url = "https://www.goodreads.com/search?q=data+science"
 
-    print("📚 Buscando libros...")
-    book_ids = get_book_ids_from_search(search_url, limit=15)
-    print("🔍 IDs obtenidos:", book_ids)
-    print("\n🕸️ Scrapeando libros...\n")
+    ids = get_book_ids_from_search(search_url, limit=20)
 
     books = []
-    for bid in book_ids:
+    for bid in ids:
+        print("⛏️  Scrapeando:", bid)
         bd = get_book(bid)
         books.append(bd)
         time.sleep(0.8)
 
     os.makedirs("landing", exist_ok=True)
-    output_path = "landing/goodreads_books.json"
+    out = "landing/goodreads_books.json"
 
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump([asdict(b) for b in books], f, indent=4, ensure_ascii=False)
 
-    print(f"\n✅ Scraping completado. Archivo generado: {output_path}")
+    print(f"✅ Archivo generado: {out}")

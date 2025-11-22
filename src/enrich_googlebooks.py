@@ -22,10 +22,9 @@ def load_goodreads_json() -> list:
 
 
 # --------------------------------------------------
-# 2️⃣ Buscar en Google Books (única función)
+# 2️⃣ Hacer búsqueda en Google Books
 # --------------------------------------------------
 def google_books_search(query: str) -> Optional[Dict]:
-    """Ejecuta una búsqueda en Google Books y devuelve el primer resultado"""
     api_url = f"{GOOGLE_API_URL}?q={query}"
     print(f"[DEBUG] API call: {api_url}")
 
@@ -49,19 +48,20 @@ def google_books_search(query: str) -> Optional[Dict]:
 
 
 # --------------------------------------------------
-# 3️⃣ Lógica combinada de búsqueda
+# 3️⃣ Estrategia de búsqueda combinada
 # --------------------------------------------------
 def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str, authors: list) -> Optional[Dict]:
-    """Busca un libro priorizando ISBN, luego título+autor"""
     clean_title = title.replace('"', "").replace("'", "").strip()
     author = authors[0] if isinstance(authors, list) and authors else ""
 
-    for query in filter(None, [
+    queries = [
         f"isbn:{isbn13}" if isbn13 else None,
         f"isbn:{isbn10}" if isbn10 else None,
         f'intitle:"{clean_title}" inauthor:"{author}"' if clean_title and author else None,
         f'intitle:"{clean_title}"' if clean_title else None
-    ]):
+    ]
+
+    for query in filter(None, queries):
         item = google_books_search(query)
         if item:
             return item
@@ -71,12 +71,13 @@ def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str,
 
 
 # --------------------------------------------------
-# 4️⃣ Extraer campos del JSON de Google Books
+# 4️⃣ Extraer campos de Google Books (CORREGIDO)
 # --------------------------------------------------
 def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
     volume = item.get("volumeInfo", {})
     sale = item.get("saleInfo", {})
 
+    # ISBNs
     isbn13, isbn10 = None, None
     for entry in volume.get("industryIdentifiers", []):
         if entry.get("type") == "ISBN_13":
@@ -84,11 +85,18 @@ def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
         elif entry.get("type") == "ISBN_10":
             isbn10 = entry.get("identifier")
 
+    # Descripción limpia
+    description = volume.get("description")
+    if isinstance(description, str):
+        description = description.replace("\n", " ").replace("\r", " ").strip()
+
+    # Precio
     price_amount = sale.get("retailPrice", {}).get("amount") if sale.get("saleability") == "FOR_SALE" else None
     price_currency = sale.get("retailPrice", {}).get("currencyCode") if sale.get("saleability") == "FOR_SALE" else None
 
     return {
         "gb_id": item.get("id"),
+        "gb_url": volume.get("infoLink"),
         "title": volume.get("title"),
         "subtitle": volume.get("subtitle"),
         "authors": "; ".join(volume.get("authors", [])) if "authors" in volume else None,
@@ -96,32 +104,38 @@ def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
         "pub_date": volume.get("publishedDate"),
         "language": volume.get("language"),
         "categories": "; ".join(volume.get("categories", [])) if "categories" in volume else None,
+        "description": description,
+        "pageCount": volume.get("pageCount"),
         "isbn13": isbn13,
         "isbn10": isbn10,
         "price_amount": price_amount,
         "price_currency": price_currency,
-        "info_link": volume.get("infoLink"),
-        "canonical_link": volume.get("canonicalVolumeLink"),
-        "api_query_url": item.get("_query_url"),
+
+        # ⭐ CORREGIDO: este campo es el que usará el merge
+        "ingestion_date_google": time.strftime("%Y-%m-%d %H:%M:%S"),
+
+        "query_url": item.get("_query_url"),
     }
 
 
 # --------------------------------------------------
-# 5️⃣ Guardar CSV limpio y ordenado
+# 5️⃣ Guardar resultado CSV
 # --------------------------------------------------
 def save_googlebooks_csv(rows: list):
     df = pd.DataFrame(rows)
-    df = df.drop_duplicates(subset=["isbn13", "title"], keep="first")
+
     ordered_cols = [
-        "gb_id", "title", "subtitle", "authors", "publisher",
-        "pub_date", "language", "categories",
+        "gb_id", "gb_url", "title", "subtitle", "authors", "publisher",
+        "pub_date", "language", "categories", "description", "pageCount",
         "isbn13", "isbn10", "price_amount", "price_currency",
-        "info_link", "canonical_link", "api_query_url"
+        "ingestion_date_google", "query_url"
     ]
+
     df = df.reindex(columns=ordered_cols)
+
     os.makedirs("landing", exist_ok=True)
     df.to_csv(LANDING_PATH, index=False, encoding="utf-8", sep=";")
-    print(f"[INFO] Archivo generado sin duplicados: {LANDING_PATH}")
+    print(f"[INFO] Archivo generado: {LANDING_PATH}")
 
 
 # --------------------------------------------------
@@ -130,14 +144,17 @@ def save_googlebooks_csv(rows: list):
 if __name__ == "__main__":
     goodreads = load_goodreads_json()
 
-    # ✅ Evitar duplicados antes de consultar
-    unique_books = {(b.get("isbn13"), b.get("title")): b for b in goodreads}.values()
-
     enriched_rows = []
-    for book in unique_books:
+    for book in goodreads:
         print(f"\n📘 Procesando: {book.get('title')}")
-        item = query_google_books(book.get("isbn13"), book.get("isbn"), book.get("title", ""), book.get("authors", []))
+        item = query_google_books(
+            book.get("isbn13"),
+            book.get("isbn"),
+            book.get("title", ""),
+            book.get("authors", [])
+        )
         time.sleep(0.5)
+
         if item:
             enriched_rows.append(extract_googlebooks_fields(item))
         else:

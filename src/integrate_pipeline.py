@@ -1,167 +1,328 @@
-import os
+"""
+merge_books_pipeline.py — versión ligera usando módulos utilitarios
+"""
+
 import json
-from datetime import datetime
+import re
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Dict, Any
+
 import pandas as pd
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 
-# ============================================================
-# 📦 IMPORTS LOCALES
-# ============================================================
-from utils.utils_isbn import canonical_book_id
-from utils.utils_quality import compute_quality_metrics
-from utils.utils_normalize import (
-    clean_publisher,
-    normalize_authors,
-    normalize_categories,
-    normalize_date,
-    normalize_language,
-    normalize_price
+# -------------------------
+# IMPORTS EXTERNALIZADOS
+# -------------------------
+
+from utils.utils_isbn import (
+    normalize_str,
+    normalize_title,
+    normalize_author,
+    get_first_author,
+    iso_date,
+    canonical_id_from_data
 )
 
-# ============================================================
-# 📁 RUTAS
-# ============================================================
-LANDING_GOODREADS = "landing/goodreads_books.json"
-LANDING_GOOGLE = "landing/googlebooks_books.csv"
-STANDARD_DIR = "standard"
-DOCS_DIR = "docs"
+from utils.utils_quality import (
+    save_dataframe_robust,
+    write_quality_metrics,
+    write_schema_markdown
+)
 
-# ============================================================
-# 📥 CARGA DE FUENTES
-# ============================================================
-def load_sources():
-    df_gr = pd.read_json(LANDING_GOODREADS)
-    df_gr["source"] = "goodreads"
-    df_gb = pd.read_csv(LANDING_GOOGLE, sep=";")
-    df_gb["source"] = "googlebooks"
 
-    df_gr["publisher"] = df_gr["publisher"].apply(clean_publisher)
-    df_gb["publisher"] = df_gb["publisher"].apply(clean_publisher)
-    return df_gr, df_gb
+# -------------------------
+# CONFIG
+# -------------------------
 
-# ============================================================
-# 🧩 DIVISIÓN AUTOMÁTICA TÍTULO / SUBTÍTULO
-# ============================================================
-def split_title_and_subtitle(title, subtitle):
-    if isinstance(title, float) or pd.isna(title):
-        title = ""
-    if isinstance(subtitle, float) or pd.isna(subtitle):
-        subtitle = None
-    if subtitle and str(subtitle).strip():
-        return str(title).strip(), str(subtitle).strip()
-    if not title or str(title).strip() == "":
-        return None, None
-    text = str(title).strip()
-    if ":" in text:
-        parts = [p.strip() for p in text.split(":", 1)]
-    elif "–" in text:
-        parts = [p.strip() for p in text.split("–", 1)]
-    else:
-        parts = [text]
-    if len(parts) == 2:
-        return parts[0], parts[1]
-    return parts[0], None
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+LANDING_DIR = PROJECT_ROOT / "landing"
+STANDARD_DIR = PROJECT_ROOT / "standard"
+DOCS_DIR = PROJECT_ROOT / "docs"
 
-# ============================================================
-# 🧩 MODELO CANÓNICO
-# ============================================================
-def build_dim_book(df):
+LANDING_DIR.mkdir(parents=True, exist_ok=True)
+STANDARD_DIR.mkdir(parents=True, exist_ok=True)
+DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+GOODREADS_FILE = LANDING_DIR / "goodreads_books.json"
+GOOGLE_PARQUET = LANDING_DIR / "googlebooks_books.parquet"
+GOOGLE_CSV = LANDING_DIR / "googlebooks_books.csv"
+
+DIM_BOOK = STANDARD_DIR / "dim_book.parquet"
+DETAIL = STANDARD_DIR / "book_source_detail.parquet"
+METRICS = DOCS_DIR / "quality_metrics.json"
+
+
+# -------------------------
+# UTIL
+# -------------------------
+
+def now_ts() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def safe_read_goodreads(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        print(f"[WARN] No existe {path}")
+        return pd.DataFrame()
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, list):
+            return pd.DataFrame(raw)
+        if isinstance(raw, dict):
+            return pd.DataFrame([raw])
+    except:
+        pass
+
+    # fallback NDJSON
     rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                rows.append(json.loads(line.strip()))
+            except:
+                pass
+    return pd.DataFrame(rows)
 
-    df["group_id"] = df.apply(canonical_book_id, axis=1)
-    grouped = df.groupby("group_id")
 
-    for gid, g in grouped:
-        gb = g[g["source"] == "googlebooks"].copy()
-        g["completitud"] = g.notna().sum(axis=1)
-        winner = g.sort_values("completitud", ascending=False).iloc[0]
+def safe_read_google(parquet: Path, csv: Path) -> pd.DataFrame:
+    df = pd.DataFrame()
+
+    if parquet.exists():
+        try:
+            df = pd.read_parquet(parquet)
+        except:
+            pass
+
+    if df.empty and csv.exists():
+        try:
+            df = pd.read_csv(csv, sep=";")
+        except:
+            pass
+
+    if not df.empty:
+        df = df.replace({np.nan: None})
+
+    return df
 
 
-        row = {}
-        title, subtitle = split_title_and_subtitle(winner.get("title"), winner.get("subtitle"))
-        row["book_id"] = gid
-        row["title"] = title
-        row["subtitle"] = subtitle
-        row["publisher"] = clean_publisher(winner.get("publisher"))
+# -------------------------
+# LÓGICA DE MERGE
+# -------------------------
 
-        isbn13w = winner.get("isbn13")
-        row["isbn13"] = isbn13w if isinstance(isbn13w, (str, int)) and str(isbn13w).isdigit() and len(str(isbn13w)) == 13 else None
-        row["isbn10"] = winner.get("isbn10")
-        row["pub_date_norm"] = normalize_date(winner.get("pub_date"))
-        row["language_norm"] = normalize_language(winner.get("language"))
-        row["price_amount_norm"] = normalize_price(winner.get("price_amount"))
-        row["price_currency"] = winner.get("price_currency")
+def choose(val_g, val_gg, prefer="goodreads"):
+    if val_g is None:
+        return val_gg
+    if val_gg is None:
+        return val_g
+    return val_g if prefer == "goodreads" else val_gg
 
-        row["categories"] = sorted(list({x for c in g["categories"].dropna() for x in normalize_categories(c)})) or None
-        row["authors"] = sorted(list({x for a in g["authors"].dropna() for x in normalize_authors(a)})) or None
 
-        if winner["source"] == "googlebooks":
-            row["fuente_ganadora"] = winner.get("info_link") or winner.get("canonical_link") or winner.get("api_query_url")
-        elif winner["source"] == "goodreads":
-            row["fuente_ganadora"] = winner.get("url")
-        else:
-            row["fuente_ganadora"] = None
+def merge_records(gr: Dict, gg: Dict) -> Dict:
 
-        row["ts_ultima_actualizacion"] = datetime.now().isoformat()
-        rows.append(row)
+    # título
+    t_g = normalize_str(gr.get("title"))
+    t_gg = normalize_str(gg.get("title") if gg else None)
+    title = choose(t_g, t_gg)
 
-    df_final = pd.DataFrame(rows)
-    df_final = df_final.drop_duplicates(subset=["isbn13", "title"], keep="first").reset_index(drop=True)
+    # autores
+    a_g = normalize_author(gr.get("authors"))
+    a_gg = normalize_author(gg.get("authors")) if gg else []
 
-    # 🔍 Deduplicación avanzada
-    df_final["title_norm"] = df_final["title"].str.lower().str.replace(r"[^a-z0-9 ]", "", regex=True).str.strip()
-    df_final["main_author"] = df_final["authors"].apply(lambda x: x[0].lower() if isinstance(x, list) and x else None)
-    df_final["completitud"] = df_final.notna().sum(axis=1)
+    merged_a = list(dict.fromkeys(a_g + a_gg))
+    first_author = merged_a[0] if merged_a else None
+    authors_str = " | ".join(merged_a) if merged_a else None
 
-    deduped = []
-    for _, group in df_final.groupby(["title_norm", "main_author"], dropna=False):
-        with_isbn = group[group["isbn13"].notna()]
-        chosen = with_isbn.iloc[0] if len(with_isbn) > 0 else group.sort_values("completitud", ascending=False).iloc[0]
-        deduped.append(chosen)
+    # categorías
+    def normalize_categories(v):
+        if not v:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if x]
+        s = str(v)
+        if "|" in s:
+            return [x.strip() for x in s.split("|") if x.strip()]
+        return [s.strip()]
 
-    df_final = pd.DataFrame(deduped).drop(columns=["title_norm", "main_author", "completitud"], errors="ignore").reset_index(drop=True)
-    return df_final
+    c_g = normalize_categories(gr.get("genres") or gr.get("categories"))
+    c_gg = normalize_categories(gg.get("categories") if gg else None)
+    categories_str = " | ".join(list(dict.fromkeys(c_g + c_gg))) if (c_g or c_gg) else None
 
-# ============================================================
-# 📄 DETALLE DE FUENTES
-# ============================================================
-def build_book_source_detail(df):
-    df_copy = df.copy()
-    df_copy["authors"] = df_copy["authors"].apply(lambda x: json.dumps(normalize_authors(x), ensure_ascii=False))
-    df_copy["categories"] = df_copy["categories"].apply(lambda x: json.dumps(normalize_categories(x), ensure_ascii=False))
-    return df_copy
+    # fechas
+    pub_g = iso_date(gr.get("publication_date") or gr.get("pub_date"))
+    pub_gg = iso_date(gg.get("pub_date") if gg else None)
+    pub_date = choose(pub_g, pub_gg)
 
-# ============================================================
-# 💾 GUARDAR SALIDAS
-# ============================================================
-def save_outputs(df_dim, df_detail, metrics):
-    os.makedirs(STANDARD_DIR, exist_ok=True)
-    os.makedirs(DOCS_DIR, exist_ok=True)
+    pub_year = None
+    if pub_date and re.match(r"^\d{4}", pub_date):
+        pub_year = int(pub_date[:4])
 
-    pq.write_table(pa.Table.from_pandas(df_dim), f"{STANDARD_DIR}/dim_book.parquet")
-    pq.write_table(pa.Table.from_pandas(df_detail), f"{STANDARD_DIR}/book_source_detail.parquet")
+    # precio
+    def safe_decimal(v):
+        try:
+            return float(str(v).replace(",", "."))
+        except:
+            return None
 
-    with open(f"{DOCS_DIR}/quality_metrics.json", "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=4, ensure_ascii=False)
+    price_amt = safe_decimal(gg.get("price_amount") if gg else None)
 
-    print("\n✔ Archivos generados correctamente en /standard y /docs\n")
+    def normalize_currency(v):
+        if not v:
+            return None
+        s = str(v).strip().upper()
+        m = {"€": "EUR", "$": "USD", "£": "GBP"}
+        return m.get(s, s[:3])
 
-# ============================================================
-# 🚀 MAIN
-# ============================================================
-if __name__ == "__main__":
-    df_gr, df_gb = load_sources()
-    df_all = pd.concat([df_gr, df_gb], ignore_index=True, sort=False)
+    price_cur = normalize_currency(gg.get("price_currency") if gg else None)
 
-    df_all["isbn13"] = df_all["isbn13"].astype(str).str.replace(".0", "", regex=False).replace("nan", np.nan)
-    df_all["pub_date"] = df_all["pub_date"].fillna(df_all.get("publication_date"))
-    df_all["pub_date"] = df_all["pub_date"].fillna(
-        df_all.get("pub_info").astype(str).str.extract(r"(\d{4}-\d{2}-\d{2})", expand=False)
+    # ISBN
+    isbn13 = normalize_str(gr.get("isbn13")) or normalize_str(gg.get("isbn13"))
+    isbn10 = normalize_str(gr.get("isbn") or gr.get("isbn10")) or normalize_str(gg.get("isbn10"))
+
+    # publisher
+    publisher = choose(normalize_str(gr.get("publisher")),
+                       normalize_str(gg.get("publisher")) if gg else None)
+
+    # descripción
+    description = choose(
+        normalize_str(gr.get("description") or gr.get("desc")),
+        normalize_str(gg.get("description")) if gg else None
     )
 
-    df_dim = build_dim_book(df_all)
-    df_detail = build_book_source_detail(df_all)
-    metrics = compute_quality_metrics(df_detail, df_dim)
-    save_outputs(df_dim, df_detail, metrics)
+    # canonical_id
+    if isbn13:
+        cid = isbn13
+    elif isbn10:
+        cid = isbn10
+    else:
+        cid = canonical_id_from_data(title, first_author, publisher, str(pub_year or ""))
+
+    # páginas
+    num_pages = choose(gr.get("num_pages"), gg.get("pageCount") if gg else None)
+
+    # preferencia
+    score_g = sum(1 for v in [t_g, a_g, pub_g, gr.get("num_pages")] if v)
+    score_gg = sum(1 for v in [t_gg, a_gg, pub_gg, price_amt, gg.get("isbn13") if gg else None] if v)
+    prefer = "goodreads" if score_g >= score_gg else "google"
+
+    url_pref = gr.get("url")
+    if gg and prefer == "google":
+        url_pref = gg.get("gb_url") or gr.get("url")
+
+    return {
+        "canonical_id": cid,
+        "isbn13": isbn13,
+        "isbn10": isbn10,
+        "title": title,
+        "authors": authors_str,
+        "first_author": first_author,
+        "publisher": publisher,
+        "pub_date": pub_date,
+        "pub_year": pub_year,
+        "language": gr.get("language") or (gg.get("language") if gg else None),
+        "categories": categories_str,
+        "num_pages": num_pages,
+        "format": choose(gr.get("format"), gg.get("format") if gg else None),
+        "description": description,
+        "rating_value": gr.get("rating_value"),
+        "rating_count": gr.get("rating_count"),
+        "price_amount": price_amt,
+        "price_currency": price_cur,
+        "source_preference": prefer,
+        "most_complete_url": url_pref,
+        "ingestion_date_goodreads": gr.get("ingestion_date"),
+        "ingestion_date_google": gg.get("ingestion_date_google") if gg else None
+    }
+
+
+# -------------------------
+# PIPELINE PRINCIPAL
+# -------------------------
+
+def run_pipeline():
+    ts = now_ts()
+    print(f"[{ts}] INICIANDO MERGE...")
+
+    df_good = safe_read_goodreads(GOODREADS_FILE)
+    df_gg = safe_read_google(GOOGLE_PARQUET, GOOGLE_CSV)
+
+    print(f"[INFO] Goodreads: {len(df_good)} | Google: {len(df_gg)}")
+
+    google_by_isbn = {}
+    google_by_key = {}
+
+    if not df_gg.empty:
+        for r in df_gg.to_dict(orient="records"):
+            if r.get("isbn13"):
+                google_by_isbn[str(r["isbn13"])] = r
+
+            tnorm = normalize_title(r.get("title"))
+            afirst = get_first_author(r.get("authors"))
+            if tnorm and afirst:
+                google_by_key.setdefault(f"{tnorm}||{afirst}", r)
+
+    merged_rows = []
+    detail_rows = []
+
+    for g in df_good.to_dict(orient="records"):
+        matched = None
+        method = "none"
+
+        isbn = normalize_str(g.get("isbn13") or g.get("isbn"))
+        if isbn and isbn in google_by_isbn:
+            matched = google_by_isbn[isbn]
+            method = "isbn13"
+        else:
+            tnorm = normalize_title(g.get("title"))
+            afirst = get_first_author(g.get("authors"))
+            if tnorm and afirst:
+                k = f"{tnorm}||{afirst}"
+                if k in google_by_key:
+                    matched = google_by_key[k]
+                    method = "heuristic"
+
+        merged = merge_records(g, matched or {})
+        merged_rows.append(merged)
+
+        detail_rows.append({
+            "canonical_id": merged["canonical_id"],
+            "from_google": bool(matched),
+            "merge_method": method,
+            "timestamp": ts,
+            "raw_goodreads": g,                   # ← datos crudos Goodreads
+            "raw_google": matched if matched else None   # ← datos crudos Google Books
+        })
+
+
+    df_final = pd.DataFrame(merged_rows)
+    df_detail = pd.DataFrame(detail_rows)
+
+    if not df_final.empty:
+        df_final["_score"] = df_final.notnull().sum(axis=1)
+        df_final = df_final.sort_values("_score", ascending=False)
+        df_final = df_final.drop_duplicates(subset=["canonical_id"], keep="first")
+        df_final.drop(columns=["_score"], inplace=True)
+
+    save_dataframe_robust(df_final, DIM_BOOK)
+    save_dataframe_robust(df_detail, DETAIL)
+
+    metrics = {
+        "generated_at": ts,
+        "rows_input_goodreads": len(df_good),
+        "rows_output": len(df_final),
+        "matched_with_google": int(df_detail["from_google"].sum()),
+        "percent_with_isbn13": round(100 * df_final["isbn13"].notnull().mean(), 2),
+        "percent_with_pub_date": round(100 * df_final["pub_date"].notnull().mean(), 2),
+        "source_preference_counts": df_final["source_preference"].value_counts().to_dict(),
+    }
+
+    write_quality_metrics(METRICS, metrics)
+    schema_path = DOCS_DIR / "schema.md"
+    write_schema_markdown(schema_path, df_final)
+    print(f"[FIN] Filas finales: {len(df_final)}")
+
+
+if __name__ == "__main__":
+    run_pipeline()
