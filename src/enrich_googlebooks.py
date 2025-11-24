@@ -71,7 +71,7 @@ def query_google_books(isbn13: Optional[str], isbn10: Optional[str], title: str,
 
 
 # --------------------------------------------------
-# 4️⃣ Extraer campos de Google Books (CORREGIDO)
+# 4️⃣ Extraer campos de Google Books
 # --------------------------------------------------
 def extract_googlebooks_fields(item: Dict[str, Any]) -> Dict[str, Any]:
     volume = item.get("volumeInfo", {})

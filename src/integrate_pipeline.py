@@ -1,7 +1,3 @@
-"""
-merge_books_pipeline.py — versión ligera usando módulos utilitarios
-"""
-
 import json
 import re
 from pathlib import Path
